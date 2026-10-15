@@ -37,3 +37,7 @@ E. Log breadth and BTC trend per position (can be rebuilt from ap_samples) to me
 F. A volatile-coin filter (ZEC, SEI, CRV, INJ, TRUMP), only after more days of data, to avoid overfitting.
 
 Caveats: 30 hours, one market, overlapping trades, simulator slightly optimistic, funding ignored.
+
+## Built 2026-10-16: two new forward-test desks
+- Quiet-hours Algo (`:algoq`): same rules as Algo, but no new entries 11:00-13:59 and 20:00-21:59 UTC. Tests the timing idea. Compare with Algo.
+- Gated AI (`:g`): same Claude calls as Aggressive, but SHORT calls are ignored unless 90%+ of coins are falling over 60 minutes. Tests whether the shorts are the AI's problem. Compare with Aggressive.
