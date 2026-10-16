@@ -11,3 +11,5 @@ Paper-trading autopilot for the top 50 coins (OKX USDT swaps). $250 per coin on 
 Deploy: connect the repo to Netlify (publish directory `/`). Environment variables: `SUPABASE_SERVICE_KEY`, `ANTHROPIC_API_KEY`.
 
 **Run only one Netlify site with these keys.** Two sites running the scheduled functions against the same Supabase project will trade twice.
+
+Control page: /control.html (PIN-protected). Settings live in an ap_news row with coin CONTROL; the PIN is the CONTROL_PIN env var on Netlify.
