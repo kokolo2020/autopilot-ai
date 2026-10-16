@@ -50,3 +50,8 @@ Caveats: 30 hours, one market, overlapping trades, simulator slightly optimistic
 ## Neutral Reversal daily log
 - Batch 1 (opened 15 Oct 20:39 Bangkok, closed 16 Oct 20:39): +$471.91 net, fees $22.00, 8/16 legs won. Market was bouncing.
 - Batch 2 opened 16 Oct 20:40. The dashboard lists every batch with its coins, sides, entry, exit and P/L; the trades also stay in `ap_positions` (coin like `XXX:rev`).
+
+## 16 Oct 22:05 Bangkok: 40-coin Algo universe
+- Algo, Wild Algo, Extra-wild Algo and Quiet-hours Algo now skip PEPE SHIB BONK WIF FLOKI TRUMP SEI JUP PENDLE GRT (10 most volatile/thin). Trades opened before this change run to their exit.
+- Neutral Reversal, the AI desks, Algo v2/v3 and Algo Top10 are unchanged.
+- Compare: Algo results before vs after this time. Trades before the change were on 50 coins.
