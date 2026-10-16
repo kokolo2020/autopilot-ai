@@ -46,3 +46,7 @@ Caveats: 30 hours, one market, overlapping trades, simulator slightly optimistic
 - Wild Algo (`:algow`): Algo entries, TP 1.2% / SL 0.6% / 60 min hold. Break-even win rate about 40% before fees.
 - Extra-wild Algo (`:algox`): TP 3% / SL 0.6% / 4 h hold. Needs about 25% wins. Expect many time-outs.
 - Compare both with plain Algo (TP 0.6 / SL 0.6 / 30 min) after 2-3 days. Paper only.
+
+## Neutral Reversal daily log
+- Batch 1 (opened 15 Oct 20:39 Bangkok, closed 16 Oct 20:39): +$471.91 net, fees $22.00, 8/16 legs won. Market was bouncing.
+- Batch 2 opened 16 Oct 20:40. The dashboard lists every batch with its coins, sides, entry, exit and P/L; the trades also stay in `ap_positions` (coin like `XXX:rev`).
