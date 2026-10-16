@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow"><title>Desk Control</title>
+<style>
+:root{--bg:#0a0e14;--panel:#111821;--ink:#e6edf5;--mut:#8796a8;--line:#1f2a37;--acc:#6db4ff;--gain:#3fcf8e;--loss:#ff6b6b;--chip:#18222e;--warn:#e0a43c;color-scheme:dark}
+*{box-sizing:border-box}[hidden]{display:none!important}#panel{display:grid;gap:16px}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif;padding:24px max(16px,env(safe-area-inset-right,0px)) 48px max(16px,env(safe-area-inset-left,0px))}
+main{max-width:860px;margin:0 auto;display:grid;gap:16px}h1{font-size:26px;margin:0}h2{font:600 13px system-ui;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);margin:0 0 10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}.mut{color:var(--mut);font-size:13px;margin:0}
+input,button{font:inherit}input[type=password],input[type=number]{background:var(--chip);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;width:100%;max-width:220px}
+button{cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--chip);color:var(--ink);padding:10px 16px;font-weight:600}button:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.pri{background:var(--acc);color:#06101c;border-color:var(--acc)}.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.big{width:100%;padding:16px;font-size:18px;border-color:var(--gain);color:var(--gain)}.big.on{border-color:var(--loss);color:var(--loss);background:#2a1416}
+table{width:100%;border-collapse:collapse}th,td{text-align:right;padding:9px 6px;border-bottom:1px solid var(--line)}th:first-child,td:first-child{text-align:left}th{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}tr:last-child td{border:0}
+.tw{overflow-x:auto}.g{color:var(--gain)}.r{color:var(--loss)}.tag{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--chip);color:var(--mut)}.tag.p{color:var(--warn)}
+.sw{padding:6px 12px;min-width:92px}.sw[aria-pressed="true"]{border-color:var(--loss);color:var(--loss)}
+.coins{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:6px}.coins button{padding:7px 4px;font-size:13px}.coins button[aria-pressed="true"]{border-color:var(--loss);color:var(--loss);text-decoration:line-through}
+.msg{min-height:20px;font-size:14px}.bar{position:sticky;bottom:0;background:var(--bg);padding:10px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+</style></head><body><main>
+<h1>Desk Control</h1>
+<section class="card" id="login"><h2>Enter PIN</h2><form id="lf" class="row"><label for="pin" class="mut">PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="12"><button class="pri" type="submit">Unlock</button></form><p class="msg" id="lm"></p></section>
+<div id="panel" hidden>
+<section class="card"><h2>Master switch</h2><button type="button" class="big" id="master"></button><p class="mut" style="margin-top:8px">Pausing stops NEW trades only. Open trades keep running to their stop, target or time limit.</p></section>
+<section class="card"><h2>Daily loss limit per desk</h2><div class="row"><label for="ll" class="mut">Pause a desk when it loses more than $</label><input id="ll" type="number" min="0" max="5000" step="50"><span class="mut">in 24 hours. 0 turns the limit off.</span></div></section>
+<section class="card"><h2>Desks</h2><div class="tw"><table><thead><tr><th>Desk</th><th>24h P/L</th><th>Status</th><th>New trades</th></tr></thead><tbody id="desks"></tbody></table></div></section>
+<section class="card"><h2>Coins</h2><p class="mut" style="margin-bottom:10px">Tap a coin to stop all desks opening NEW trades on it. Crossed out means blocked.</p><div class="coins" id="coins"></div></section>
+<div class="bar"><button class="pri" id="apply" type="button">Apply changes</button><span class="msg" id="am"></span></div>
+</div>
+</main>
+<script>
+var B='https://seiqqvplosnwquaksshm.supabase.co/rest/v1/',K='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho',F='/.netlify/functions/control';
+var DESKS=[['algo','Algo'],['algoq','Quiet-hours Algo'],['algo2','Algo v2'],['algo3','Algo v3'],['rev','Neutral Reversal'],['ai','Aggressive AI'],['g','Gated AI'],['n','Normal AI'],['s','Super AI (paused)'],['u','Ultra AI (paused)'],['m','Maker AI (paused)']];
+var pin='',S={paused:false,off:{},coinsOff:{},lossLimit:0},pl={},COINS=[];
+function $(i){return document.getElementById(i)}function money(x){return (x<0?'-$':'+$')+Math.round(Math.abs(x)).toLocaleString()}
+async function call(action,state){var r=await fetch(F,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:pin,action:action,state:state})});var j={};try{j=await r.json()}catch(e){}return {s:r.status,j:j}}
+async function load24(){var since=new Date(Date.now()-864e5).toISOString(),sum={};for(var o=0;o<5000;o+=1000){var r=await (await fetch(B+'ap_positions?select=coin,pnl&status=eq.closed&closed_at=gte.'+since+'&order=id.asc&limit=1000&offset='+o,{headers:{apikey:K,Authorization:'Bearer '+K}})).json();if(!Array.isArray(r))break;r.forEach(function(x){var k=x.coin.indexOf(':')<0?'ai':x.coin.split(':')[1];sum[k]=(sum[k]||0)+ +x.pnl});if(r.length<1000)break}pl=sum;
+ var sm=await (await fetch(B+'ap_samples?select=coin&order=ts.desc&limit=60',{headers:{apikey:K,Authorization:'Bearer '+K}})).json();var seen={};COINS=[];if(Array.isArray(sm))sm.forEach(function(x){if(!seen[x.coin]){seen[x.coin]=1;COINS.push(x.coin)}});COINS.sort();Object.keys(S.coinsOff).forEach(function(c){if(COINS.indexOf(c)<0)COINS.push(c)})}
+function draw(){var m=$('master');m.className='big'+(S.paused?' on':'');m.textContent=S.paused?'ALL NEW TRADES PAUSED. Tap to resume':'Running. Tap to pause all new trades';m.setAttribute('aria-pressed',S.paused);
+ $('ll').value=S.lossLimit||0;
+ $('desks').innerHTML=DESKS.map(function(d){var p=pl[d[0]]||0,auto=S.lossLimit>0&&p<=-S.lossLimit,off=!!S.off[d[0]];return '<tr><td>'+d[1]+'</td><td class="'+(p<0?'r':p>0?'g':'')+'">'+money(p)+'</td><td>'+(S.paused?'<span class="tag p">master pause</span>':off?'<span class="tag p">paused by you</span>':auto?'<span class="tag p">auto-paused (limit)</span>':'<span class="tag">running</span>')+'</td><td><button type="button" class="sw" data-k="'+d[0]+'" aria-pressed="'+off+'">'+(off?'Paused':'Running')+'</button></td></tr>'}).join('');
+ $('coins').innerHTML=COINS.map(function(c){return '<button type="button" data-c="'+c+'" aria-pressed="'+!!S.coinsOff[c]+'">'+c+'</button>'}).join('');
+ Array.prototype.forEach.call(document.querySelectorAll('[data-k]'),function(b){b.onclick=function(){S.off[b.dataset.k]=!S.off[b.dataset.k];draw()}});
+ Array.prototype.forEach.call(document.querySelectorAll('[data-c]'),function(b){b.onclick=function(){S.coinsOff[b.dataset.c]=!S.coinsOff[b.dataset.c];draw()}})}
+$('master').onclick=function(){S.paused=!S.paused;draw()};
+$('ll').onchange=function(){S.lossLimit=Math.max(0,Math.min(5000,+this.value||0));draw()};
+$('lf').onsubmit=async function(e){e.preventDefault();pin=$('pin').value;$('lm').textContent='Checking…';var r=await call('get');
+ if(r.s===200){S=Object.assign({paused:false,off:{},coinsOff:{},lossLimit:0},r.j.state);$('login').hidden=true;$('panel').hidden=false;await load24();draw()}
+ else if(r.s===401)$('lm').textContent='Wrong PIN. '+(r.j.triesLeft!=null?r.j.triesLeft+' tries left.':'');else if(r.s===429)$('lm').textContent='Locked. Try again in '+(r.j.retryMin||15)+' minutes.';else $('lm').textContent='Could not reach the server.'};
+$('apply').onclick=async function(){$('am').textContent='Saving…';var r=await call('set',S);if(r.s===200){S=Object.assign(S,r.j.state);$('am').textContent='Saved. Applies from the next 5-minute check.';draw()}else $('am').textContent=r.s===429?'Locked for now.':'Not saved ('+r.s+').'}
+</script></body></html>
