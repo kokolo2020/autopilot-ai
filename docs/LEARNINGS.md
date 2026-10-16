@@ -41,3 +41,8 @@ Caveats: 30 hours, one market, overlapping trades, simulator slightly optimistic
 ## Built 2026-10-16: two new forward-test desks
 - Quiet-hours Algo (`:algoq`): same rules as Algo, but no new entries 11:00-13:59 and 20:00-21:59 UTC. Tests the timing idea. Compare with Algo.
 - Gated AI (`:g`): same Claude calls as Aggressive, but SHORT calls are ignored unless 90%+ of coins are falling over 60 minutes. Tests whether the shorts are the AI's problem. Compare with Aggressive.
+
+## Built 2026-10-16: wild desks (Koko: "go but wild and extra wild")
+- Wild Algo (`:algow`): Algo entries, TP 1.2% / SL 0.6% / 60 min hold. Break-even win rate about 40% before fees.
+- Extra-wild Algo (`:algox`): TP 3% / SL 0.6% / 4 h hold. Needs about 25% wins. Expect many time-outs.
+- Compare both with plain Algo (TP 0.6 / SL 0.6 / 30 min) after 2-3 days. Paper only.

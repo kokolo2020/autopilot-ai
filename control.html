@@ -28,7 +28,7 @@ table{width:100%;border-collapse:collapse}th,td{text-align:right;padding:9px 6px
 </main>
 <script>
 var B='https://seiqqvplosnwquaksshm.supabase.co/rest/v1/',K='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho',F='/.netlify/functions/control';
-var DESKS=[['algo','Algo'],['algoq','Quiet-hours Algo'],['algo2','Algo v2'],['algo3','Algo v3'],['rev','Neutral Reversal'],['ai','Aggressive AI'],['g','Gated AI'],['n','Normal AI'],['s','Super AI (paused)'],['u','Ultra AI (paused)'],['m','Maker AI (paused)']];
+var DESKS=[['algo','Algo'],['algoq','Quiet-hours Algo'],['algow','Wild Algo (1.2% TP)'],['algox','Extra-wild Algo (3% TP)'],['algo2','Algo v2'],['algo3','Algo v3'],['rev','Neutral Reversal'],['ai','Aggressive AI'],['g','Gated AI'],['n','Normal AI'],['s','Super AI (paused)'],['u','Ultra AI (paused)'],['m','Maker AI (paused)']];
 var pin='',S={paused:false,off:{},coinsOff:{},lossLimit:0},pl={},COINS=[];
 function $(i){return document.getElementById(i)}function money(x){return (x<0?'-$':'+$')+Math.round(Math.abs(x)).toLocaleString()}
 async function call(action,state){var r=await fetch(F,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:pin,action:action,state:state})});var j={};try{j=await r.json()}catch(e){}return {s:r.status,j:j}}
