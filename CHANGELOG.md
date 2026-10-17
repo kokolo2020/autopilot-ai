@@ -2,6 +2,10 @@
 
 Every push bumps the version. The version shows next to the title on the page, so you can tell which build Netlify is serving.
 
+
+## v1.23.1
+- Top-100 research track is switched off by default (the desks stay on the top 50 coins). To run it, set the Netlify environment variable TOP100_ENABLED=1; nothing else needs to change, and the table ap_prices100 is only needed then.
+
 ## v1.20
 - Neutral Rev 2 (stored as `XXX:rev2`) and Neutral Rev 2 limit (`XXX:revm`): same picks as Neutral Rev (long the 8 weakest, short the 8 strongest by 24h change, one batch per 24h, 24h hold, no take profit). Leg 1 opens at 4x with a 15% stop. When the stop hits, the loss is booked and the same side reopens at the market price one step higher (5x, 6x, 7x), with the same batch deadline. After the stop at 7x the leg is done (3 resets max). Every entry is a fresh $250 margin, so one leg can commit up to $1,000 margin and book roughly $800 of losses if price keeps running. The stop sits just inside liquidation (1/lev minus 1%), so at 7x it is 13.3%, not 15%.
 - The limit twin places leg 1 as a limit order 0.10% better, waits 10 minutes, pays the maker fee on that entry; resets and exits are market (taker). Unfilled legs are cancelled, so fill rate can be compared against the market version.
