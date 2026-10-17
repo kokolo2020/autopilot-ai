@@ -65,3 +65,10 @@ create table if not exists ap_daily_snapshots (
 );
 alter table ap_daily_snapshots enable row level security;
 create policy "anon read daily" on ap_daily_snapshots for select to anon using (true);
+
+-- Top-100 research track: latest price per coin, overwritten every run by netlify/functions/top100.mjs (100 rows). Ranked by 24h USD volume on OKX.
+create table if not exists ap_prices100 (
+  coin text primary key, price numeric not null, ret_60m numeric, change24h numeric, vol_usd numeric, rank int, updated_at timestamptz not null
+);
+alter table ap_prices100 enable row level security;
+create policy "anon read prices100" on ap_prices100 for select to anon using (true);

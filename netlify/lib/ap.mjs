@@ -300,9 +300,8 @@ export async function tick(env, coin, shared) {
 }
 
 /* ---------- Scanner over the top 20 (v1.13) ---------- */
-async function scanCoin(coin, tk) {
-  const c = COINS[coin];
-  const cd = await okx('/api/v5/market/candles?instId=' + c.inst + '&bar=1m&limit=100');
+async function scanCoin(coin, tk, instId) {
+  const cd = await okx('/api/v5/market/candles?instId=' + (instId || COINS[coin].inst) + '&bar=1m&limit=100');
   const candles = cd.map((k) => ({ t: +k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4] })).sort((a, b) => a.t - b.t);
   if (candles.length < 61) throw new Error('few candles');
   const price = +tk.last, n = candles.length, ref = candles[n - 7].c;
@@ -445,8 +444,8 @@ async function algoTick(db, r, openAlgo, closedAlgo, v, breadth, ctl) {
   if (v === 'algot' && !ALGOT_COINS.includes(r.coin)) return 'not top10';
   const open = openAlgo[key];
   if (open) { const x = await manageOpen(db, open, m); return x.closed ? 'closed ' + x.pnl.toFixed(2) : 'holding'; }
-  if ((v === 'algo' || v === 'algow' || v === 'algox' || v === 'algoq') && ALGO_SKIP.includes(r.coin)) return 'excluded';
-  const closed = closedAlgo[key] || [], bank = START + closed.reduce((s, x) => s + +x.pnl, 0);
+  if ((v === 'algo' || v === 'algow' || v === 'algox' || v === 'algoq' || v === 'algo100') && ALGO_SKIP.includes(r.coin)) return 'excluded';
+  const closed = closedAlgo[key] || [], bank = (v === 'algo100' ? START100 : START) + closed.reduce((s, x) => s + +x.pnl, 0);
   if (closed[0] && Date.now() - new Date(closed[0].closed_at).getTime() < P.cooldownMin * 60000) return 'cooldown';
   if (ctlBlocks(ctl, v, r.coin)) return 'paused';
   if (bank < 20 || (r.spread_bps != null && r.spread_bps > MAX_SPREAD_BPS)) return 'skip';
@@ -455,6 +454,54 @@ async function algoTick(db, r, openAlgo, closedAlgo, v, breadth, ctl) {
   const dir = sig.side === 'LONG' ? 1 : -1, notional = bank * LEV, d = decFor(m.price) + 2;
   await db.insert('ap_positions', { coin: key, side: sig.side, entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * P.tp / 100)).toFixed(d), sl: +(m.price * (1 - dir * P.sl / 100)).toFixed(d), max_hold_until: new Date(Date.now() + P.holdMin * 60000).toISOString() });
   return 'opened ' + sig.side;
+}
+
+/* ---------- Top-100 research track (separate scheduled function, every 5 min at minutes 2,7,12...) ----------
+   100 liquid OKX USDT perpetuals ranked by 24h USD volume (OKX has no market cap, so volume is the proxy), $100 per coin instead of $250.
+   Two rule-based desks only, no Claude calls: Algo rules (:algo100) and Neutral Reversal (:rev100, 16 weakest long / 16 strongest short = the same 16% of the universe as 8 of 50, 24h hold, no stops).
+   Latest prices go to ap_prices100 (100 rows, overwritten each run); nothing is written to ap_samples, so the top-50 dashboard and race chart are untouched. */
+export const START100 = 100, TOP100_N = 100, REV100 = { K: 16, holdH: 24 };
+const STABLES = ['USDC', 'USDT', 'DAI', 'FDUSD', 'TUSD', 'USDE', 'USDG', 'PYUSD', 'XAUT', 'PAXG'];
+async function rev100Tick(db, rows, openRev, ctl) {
+  const out = [];
+  for (const p of openRev) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
+  if (openRev.length || ctlBlocks(ctl, 'rev100', '')) return out;
+  const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*:rev100&order=opened_at.desc&limit=1').catch(() => []))[0];
+  if (last && Date.now() - new Date(last.opened_at).getTime() < REV100.holdH * 3600000) return out;
+  const rk = rows.filter((r) => !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
+  if (rk.length < REV100.K * 2 + 8) return out;
+  const legs = rk.slice(0, REV100.K).map((r) => [r, 1]).concat(rk.slice(-REV100.K).map((r) => [r, -1]));
+  for (const [r, dir] of legs) {
+    const m = r.m, notional = START100 * LEV, d = decFor(m.price) + 2;
+    await db.insert('ap_positions', { coin: r.coin + ':rev100', side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * 0.5)).toFixed(d), sl: +(m.price * (1 - dir * 0.5)).toFixed(d), max_hold_until: new Date(Date.now() + REV100.holdH * 3600000).toISOString() });
+    out.push('rev100 opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + r.coin);
+  }
+  return out;
+}
+export async function top100Tick(env) {
+  if (!env.SUPABASE_SERVICE_KEY) return { skipped: 'missing keys' };
+  const db = sb(env.SUPABASE_SERVICE_KEY), tk = {};
+  for (const t of await okx('/api/v5/market/tickers?instType=SWAP')) if (/^[A-Z0-9]+-USDT-SWAP$/.test(t.instId) && +t.last > 0) tk[t.instId.replace('-USDT-SWAP', '')] = t;
+  const vol = (s) => +tk[s].volCcy24h * +tk[s].last;
+  const ranked = Object.keys(tk).filter((s) => !STABLES.includes(s)).sort((a, b) => vol(b) - vol(a));
+  const openAll = (await db.select('ap_positions', 'select=*&status=eq.open')).filter((p) => /:(algo|rev)100$/.test(p.coin));
+  const coins = ranked.slice(0, TOP100_N); // coins that still have an open trade stay in the scan until it closes
+  for (const p of openAll) { const b = p.coin.split(':')[0]; if (tk[b] && !coins.includes(b)) coins.push(b); }
+  const rows = [];
+  for (let i = 0; i < coins.length; i += 10) {
+    const part = await Promise.all(coins.slice(i, i + 10).map((s) => scanCoin(s, tk[s], tk[s].instId).catch(() => null)));
+    for (const r of part) if (r) rows.push(r);
+    if (i + 10 < coins.length) await new Promise((r) => setTimeout(r, 600));
+  }
+  if (rows.length < 60) return { skipped: 'only ' + rows.length + ' coins scanned' };
+  const now = new Date().toISOString();
+  await db.upsert('ap_prices100', rows.map((r) => ({ coin: r.coin, price: r.m.price, ret_60m: r4(r.F.ret_60m), change24h: r4(r.m.change24h_pct), vol_usd: Math.round(vol(r.coin)), rank: ranked.indexOf(r.coin) + 1 || null, updated_at: now })), 'coin').catch((e) => console.log('prices100 ' + String(e.message || e).slice(0, 100)));
+  const ctl = await loadControl(db); ctl.auto = {};
+  const openAlgo = {}; for (const p of openAll) if (p.coin.endsWith(':algo100')) openAlgo[p.coin] = p;
+  const closedAlgo = {}; for (const x of await selectAll(db, 'ap_positions', 'select=coin,pnl,closed_at&status=eq.closed&coin=like.*:algo100&order=closed_at.desc,id.desc').catch(() => [])) (closedAlgo[x.coin] = closedAlgo[x.coin] || []).push(x);
+  const algoRes = await Promise.all(rows.map((r) => algoTick(db, r, openAlgo, closedAlgo, 'algo100', 0.5, ctl).then((s) => r.coin + ' ' + s).catch((e) => r.coin + ' error ' + String(e.message || e).slice(0, 60))));
+  const revRes = await rev100Tick(db, rows, openAll.filter((p) => p.coin.endsWith(':rev100')), ctl).catch((e) => ['rev100 error ' + String(e.message || e).slice(0, 60)]);
+  return { scanned: rows.length, algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes };
 }
 
 /* Neutral Reversal desk (:rev): every 24h long the 8 weakest and short the 8 strongest coins by 24h change. No stops, 24h hold. Backtest: positive in bear and bull, but only 14 days of data. Forward test. */
