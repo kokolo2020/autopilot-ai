@@ -15,6 +15,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.29.2
+- Rev 3: funding paid or received is booked into each entry's P/L when it closes (OKX funding history, longs pay when the rate is positive); Horizons shows funding per batch
+
 ## v1.29.1
 - Rev 3: one shared deadline per batch; Horizons page groups legs into batches by deadline window (it showed each leg as its own batch)
 

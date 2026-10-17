@@ -184,10 +184,22 @@ export async function newsJob(env, coin) {
 }
 
 /* ---------- Decision loop (runs every 5 min) ---------- */
+/* Funding paid or received by a Rev 3 position while it was open: every settlement between open and close, rate x notional, longs pay when the rate is positive. Booked into pnl when the position closes (no schema change), and noted in close_reason. */
+export async function rev3Funding(p, endMs = Date.now()) {
+  const t0 = new Date(p.opened_at).getTime(), sym = p.coin.split(':')[0] + '-USDT-SWAP', dir = p.side === 'LONG' ? 1 : -1; let after = '', sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const h = await okx('/api/v5/public/funding-rate-history?instId=' + sym + '&limit=100' + (after ? '&after=' + after : ''));
+    if (!h || !h.length) break;
+    for (const x of h) { const t = +x.fundingTime, rate = x.realizedRate != null && x.realizedRate !== '' ? +x.realizedRate : +x.fundingRate; if (t > t0 && t <= endMs && isFinite(rate)) sum -= dir * +p.notional * rate; }
+    const oldest = +h[h.length - 1].fundingTime; if (oldest <= t0 || h.length < 100) break; after = h[h.length - 1].fundingTime;
+  }
+  return sum;
+}
 const closePos = async (db, p, exit, why) => {
   const dir = p.side === 'LONG' ? 1 : -1;
-  const fees = /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - START * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + FEE) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees;
-  await db.update('ap_positions', 'id=eq.' + p.id, { status: 'closed', exit_price: exit, closed_at: new Date().toISOString(), pnl, fees, close_reason: why });
+  const funding = /:r3[dwmy]$/.test(p.coin) ? await rev3Funding(p).catch(() => 0) : 0;
+  const fees = /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - START * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + FEE) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
+  await db.update('ap_positions', 'id=eq.' + p.id, { status: 'closed', exit_price: exit, closed_at: new Date().toISOString(), pnl, fees, close_reason: funding ? why + ' | funding ' + (funding >= 0 ? '+' : '') + funding.toFixed(2) : why });
   return pnl;
 };
 
@@ -444,7 +456,7 @@ async function rev2Tick(db, rows, openPos, ctl, desk) {
    Same picks as Neutral Rev (long the 8 weakest, short the 8 strongest by 24h change, one batch, market orders, no take profit), but the stop is a share of the $250 MARGIN, not of the price:
    10% of margin = $25 per entry, so the price stop is 10% / leverage (2.5% at 4x, 2% at 5x, 1.67% at 6x, 1.43% at 7x). A stopped leg books the loss and reopens the SAME side at the next leverage step (4x -> 5x -> 6x -> 7x, fresh $250 margin each),
    with the same deadline. After the stop at 7x the leg is done. Worst case per leg is therefore 4 x $25 = $100 plus fees (plus any gap past the stop). At the deadline everything left open is closed at the market; the next batch starts one horizon later.
-   Horizons: daily 24 h, weekly 7 d, monthly 30 d, yearly 365 d. Funding payments on the perps are not modelled. Back-test (42 overlapping 24 h batches, one falling market) favoured the 10% margin stop with the ladder; longer horizons are untested. Forward test. */
+   Horizons: daily 24 h, weekly 7 d, monthly 30 d, yearly 365 d. Funding is booked into pnl when each entry closes (see rev3Funding). Back-test (42 overlapping 24 h batches, one falling market) favoured the 10% margin stop with the ladder; longer horizons are untested. Forward test. */
 export const REV3 = { K: 8, lev0: 4, levMax: 7, stopMargin: 0.10, hours: { r3d: 24, r3w: 168, r3m: 720, r3y: 8760 } };
 export const rev3Stop = (lev) => REV3.stopMargin / lev;
 export async function rev3Tick(db, rows, openPos, ctl, desk) {

@@ -40,7 +40,7 @@
 <div class="wrap">
   <h1>AUTOPILOT HORIZONS <span class="newb">NEW</span> <small><span id="ver"></span> · Rev 3 · paper money</small></h1>
   <div class="sub">One strategy, four time horizons. Each batch goes long the 8 weakest and short the 8 strongest coins (24h change) with $250 margin per leg, starts at 4x, and every entry carries a <b>$25 stop</b> (10% of margin). A stopped leg reopens on the same side at 5x, then 6x, then 7x, then it is done. Whatever is left open is closed at the horizon. <a href="/research.html">Research dashboard</a> · <a href="/">Public summary</a></div>
-  <div class="note">Back-test (42 overlapping 24h batches, one falling market) favoured this rule. The weekly, monthly and yearly versions are untested guesses. A $25 stop is a tight stop over a long horizon, so expect legs to finish early and the long horizons to behave very differently from the daily one. Funding payments are not modelled. Paper only, nothing here places real orders.</div>
+  <div class="note">Back-test (42 overlapping 24h batches, one falling market) favoured this rule. The weekly, monthly and yearly versions are untested guesses. A $25 stop is a tight stop over a long horizon, so expect legs to finish early and the long horizons to behave very differently from the daily one. Funding payments are booked when each entry closes (open entries show price and fees only). Paper only, nothing here places real orders.</div>
   <div class="tabs" id="tabs" role="tablist"></div>
   <div id="body"><div class="card mut">loading…</div></div>
 </div>
@@ -77,12 +77,12 @@
       var k = g[g.length - 1].max_hold_until, list = g.sort(function (a, b) { return a.opened_at < b.opened_at ? -1 : 1; }), coins = {};
       list.forEach(function (p) { var c = p.coin.split(':')[0]; (coins[c] = coins[c] || []).push(p); });
       var legs = Object.keys(coins).map(function (c) {
-        var es = coins[c], last = es[es.length - 1], lev = Math.round(+last.notional / MARGIN), real = 0, unr = 0, stops = 0, fees = 0;
-        es.forEach(function (p) { if (p.status === 'closed') { real += +p.pnl || 0; fees += +p.fees || 0; if (p.close_reason === 'stop hit') stops++; } else unr += entryNet(p); });
-        return { coin: c, side: last.side, lev: lev, entries: es.length, stops: stops, open: last.status === 'open', last: last, real: real, unr: unr, net: real + unr, fees: fees, why: last.close_reason };
+        var es = coins[c], last = es[es.length - 1], lev = Math.round(+last.notional / MARGIN), real = 0, unr = 0, stops = 0, fees = 0, fund = 0;
+        es.forEach(function (p) { if (p.status === 'closed') { real += +p.pnl || 0; fees += +p.fees || 0; if (String(p.close_reason).indexOf('stop hit') === 0) stops++; fund += +((/funding ([+-][0-9.]+)/.exec(p.close_reason || '') || [0, 0])[1]); } else unr += entryNet(p); });
+        return { coin: c, side: last.side, lev: lev, entries: es.length, stops: stops, open: last.status === 'open', last: last, real: real, unr: unr, net: real + unr, fees: fees, fund: fund, why: last.close_reason };
       }).sort(function (a, b) { return b.net - a.net; });
       var start = list.filter(function (p) { return Math.round(+p.notional / MARGIN) === 4; }).map(function (p) { return p.opened_at; }).sort()[0] || list[0].opened_at;
-      return { deadline: k, start: start, legs: legs, live: legs.some(function (l) { return l.open; }) || new Date(k).getTime() > Date.now(), real: sum(legs, 'real'), unr: sum(legs, 'unr'), net: sum(legs, 'net'), fees: sum(legs, 'fees'), stops: sum(legs, 'stops'), entries: sum(legs, 'entries') };
+      return { deadline: k, start: start, legs: legs, live: legs.some(function (l) { return l.open; }) || new Date(k).getTime() > Date.now(), real: sum(legs, 'real'), unr: sum(legs, 'unr'), net: sum(legs, 'net'), fees: sum(legs, 'fees'), fund: sum(legs, 'fund'), stops: sum(legs, 'stops'), entries: sum(legs, 'entries') };
     }).sort(function (a, b) { return a.start < b.start ? 1 : -1; });
   }
   function sum(a, k) { return a.reduce(function (s, x) { return s + x[k]; }, 0); }
@@ -103,10 +103,10 @@
       '<div class="kpi"><div class="l">Current batch</div><div class="v ' + cls(b.net) + '">' + money(b.net) + '</div><div class="n">' + (b.net / base * 100).toFixed(2) + '% of $' + base.toLocaleString() + ' base margin</div></div>' +
       '<div class="kpi"><div class="l">' + (live ? 'Closes in' : 'Closed') + '</div><div class="v">' + (live ? left(new Date(b.deadline).getTime() - Date.now()) : 'done') + '</div><div class="n">started ' + when(b.start) + '</div></div>' +
       '<div class="kpi"><div class="l">Legs open now</div><div class="v">' + b.legs.filter(function (l) { return l.open; }).length + ' / ' + LEGS + '</div><div class="n">' + b.stops + ' stops hit, ' + b.entries + ' entries</div></div>' +
-      '<div class="kpi"><div class="l">Booked / open</div><div class="v" style="font-size:16px"><span class="' + cls(b.real) + '">' + money(b.real) + '</span> <span class="mut">/</span> <span class="' + cls(b.unr) + '">' + money(b.unr) + '</span></div><div class="n">fees so far $' + b.fees.toFixed(2) + ' (open entries priced with both fees)</div></div>' +
+      '<div class="kpi"><div class="l">Booked / open</div><div class="v" style="font-size:16px"><span class="' + cls(b.real) + '">' + money(b.real) + '</span> <span class="mut">/</span> <span class="' + cls(b.unr) + '">' + money(b.unr) + '</span></div><div class="n">fees $' + b.fees.toFixed(2) + ' · funding on closed entries ' + money(b.fund) + ' (open entries priced with both fees, funding booked when an entry closes)</div></div>' +
       '<div class="kpi"><div class="l">All ' + h[1].toLowerCase() + ' batches</div><div class="v ' + cls(allNet) + '">' + money(allNet) + '</div><div class="n">' + bs.length + ' batch' + (bs.length === 1 ? '' : 'es') + ', ' + done.length + ' finished</div></div></div>';
     var rows = b.legs.map(function (l) {
-      var lv = px[l.coin], state = l.open ? '<span class="ladder">open · ' + l.lev + 'x</span>' : l.why === 'stop hit' ? '<span class="ladder down">stopped out at ' + l.lev + 'x · done</span>' : '<span class="ladder mut">closed at deadline</span>';
+      var lv = px[l.coin], state = l.open ? '<span class="ladder">open · ' + l.lev + 'x</span>' : String(l.why).indexOf('stop hit') === 0 ? '<span class="ladder down">stopped out at ' + l.lev + 'x · done</span>' : '<span class="ladder mut">closed at deadline</span>';
       return '<tr' + (l.net > 0 ? ' class="pos"' : '') + '><td class="coin">' + esc(l.coin) + ' <span class="pill ' + l.side + '">' + l.side + '</span></td><td>' + state + '</td><td class="mono">' + l.entries + '</td><td class="mono">' + pxf(l.last.entry_price) + '</td><td class="mono">' + (lv == null ? '–' : pxf(lv)) + '</td><td class="mono ' + cls(l.real) + '">' + (l.entries > 1 || !l.open ? money(l.real) : '–') + '</td><td class="mono ' + cls(l.unr) + '">' + (l.open ? money(l.unr) : '–') + '</td><td class="mono ' + cls(l.net) + '"><b>' + money(l.net) + '</b></td></tr>';
     }).join('');
     var hist = bs.map(function (x) {
