@@ -467,9 +467,10 @@ export async function rev3Tick(db, rows, openPos, ctl, desk) {
   const rk = rows.filter((r) => !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
   if (rk.length < REV3.K * 2 + 4) return out;
   const legs = rk.slice(0, REV3.K).map((r) => [r, 1]).concat(rk.slice(-REV3.K).map((r) => [r, -1]));
+  const deadline = new Date(Date.now() + holdH * 3600000).toISOString(); // one deadline for the whole batch
   for (const [r, dir] of legs) {
     const m = r.m, d = decFor(m.price) + 2, px = m.price, sp = rev3Stop(REV3.lev0);
-    await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: px, size: lev0N / px, notional: lev0N, tp: +(px * (dir > 0 ? 100 : 0.01)).toFixed(d), sl: +(px * (1 - dir * sp)).toFixed(d), max_hold_until: new Date(Date.now() + holdH * 3600000).toISOString() });
+    await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: px, size: lev0N / px, notional: lev0N, tp: +(px * (dir > 0 ? 100 : 0.01)).toFixed(d), sl: +(px * (1 - dir * sp)).toFixed(d), max_hold_until: deadline });
     out.push(desk + ' opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + r.coin);
   }
   return out;

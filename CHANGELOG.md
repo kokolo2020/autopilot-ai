@@ -14,6 +14,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.29.1
+- Rev 3: one shared deadline per batch; Horizons page groups legs into batches by deadline window (it showed each leg as its own batch)
+
 ## v1.29
 - Rev 3: four paper desks (daily, weekly, monthly, yearly) with a $25 stop per entry (10% of margin) and the 4x->7x ladder, plus a Horizons page with one tab per horizon
 

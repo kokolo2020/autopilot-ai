@@ -70,10 +70,11 @@
     return n * (p.side === 'LONG' ? 1 : -1) * (l - e) / e - n * FEE * 2;
   }
   function batches(desk) {
-    var by = {};
-    P.filter(function (p) { return p.coin.slice(-4) === ':' + desk; }).forEach(function (p) { (by[p.max_hold_until] = by[p.max_hold_until] || []).push(p); });
-    return Object.keys(by).map(function (k) {
-      var list = by[k].sort(function (a, b) { return a.opened_at < b.opened_at ? -1 : 1; }), coins = {};
+    /* a batch = positions whose deadlines are within 10 minutes of each other (batches before v1.29.1 stored a slightly different deadline per leg) */
+    var mine = P.filter(function (p) { return p.coin.slice(-4) === ':' + desk; }).sort(function (a, b) { return new Date(a.max_hold_until) - new Date(b.max_hold_until); }), groups = [], lastT = null;
+    mine.forEach(function (p) { var t = new Date(p.max_hold_until).getTime(); if (lastT === null || t - lastT > 600000) groups.push([]); groups[groups.length - 1].push(p); lastT = t; });
+    return groups.map(function (g) {
+      var k = g[g.length - 1].max_hold_until, list = g.sort(function (a, b) { return a.opened_at < b.opened_at ? -1 : 1; }), coins = {};
       list.forEach(function (p) { var c = p.coin.split(':')[0]; (coins[c] = coins[c] || []).push(p); });
       var legs = Object.keys(coins).map(function (c) {
         var es = coins[c], last = es[es.length - 1], lev = Math.round(+last.notional / MARGIN), real = 0, unr = 0, stops = 0, fees = 0;
