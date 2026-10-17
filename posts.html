@@ -33,8 +33,9 @@
 <body>
 <div class="wrap">
   <h1>AUTOPILOT POST DRAFTS <small><span id="ver"></span> · for X · paper money</small></h1>
-  <div class="sub">A daily recap written from the daily snapshots: one results image and three draft posts, ready to edit, copy and post. <a href="/research.html">Research dashboard</a> · <a href="/horizons.html">Horizons</a> · <a href="/">Public summary</a></div>
-  <div class="chips" id="days" role="group" aria-label="Day"></div>
+  <div class="sub">Draft posts for X written from the daily snapshots: a spotlight on one winning strategy, or a daily recap of all of them. Each comes with a results image and three drafts to edit, copy and post. <a href="/research.html">Research dashboard</a> · <a href="/horizons.html">Horizons</a> · <a href="/">Public summary</a></div>
+  <div class="chips" id="modes" role="group" aria-label="Post type"></div>
+  <div class="chips" id="days" role="group" aria-label="Day or strategy"></div>
   <div id="body"><div class="card mut">loading…</div></div>
 </div>
 <div class="toast" id="toast" role="status"></div>
@@ -45,7 +46,7 @@
   var SITE = 'auto-pilotai.netlify.app', FIRST = '2026-10-14', LIMIT = 280, LINKLEN = 23;
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
-  var ALL = [], day = null;
+  var ALL = [], day = null, mode = 'spot', spotDesk = null;
   function get(t, q) { return fetch(URL_ + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
   fetch('/version.json?t=' + Date.now()).then(function (r) { return r.json(); }).then(function (v) { $('ver').textContent = 'ap-v' + v.version; }).catch(function () {});
   function toast(t) { var e = $('toast'); e.textContent = t; e.classList.add('on'); setTimeout(function () { e.classList.remove('on'); }, 1600); }
@@ -112,24 +113,72 @@
     c.fillStyle = '#8b98a8'; c.font = '500 22px ' + sans; c.fillText('same OKX perpetual coins, fake money', W - 56, 118);
     c.textAlign = 'left'; c.fillStyle = '#5b6b7d'; c.font = '500 20px ' + sans; c.fillText(SITE + '  ·  paper money, fees included, not financial advice', 56, H - 34);
   }
-  function dl() { var cv = $('cv'); cv.toBlob(function (b) { var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'autopilot-day-' + dayNo(day) + '.png'; document.body.appendChild(a); a.click(); a.remove(); }, 'image/png'); }
+  function dl() { var cv = $('cv'); cv.toBlob(function (b) { var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = mode === 'spot' ? 'autopilot-' + spotDesk + '.png' : 'autopilot-day-' + dayNo(day) + '.png'; document.body.appendChild(a); a.click(); a.remove(); }, 'image/png'); }
 
+
+  /* ---------- strategy spotlight ---------- */
+  var RULE = { rev: 'Each day: long the 8 coins that fell most, short the 8 that rose most, close after 24 hours. No stops.', rev2: 'The Neutral Rev picks, with a stop on every trade that reopens it at higher leverage.', revm: 'Neutral Rev 2 with limit-order entries.', algo3: 'Shorts bounces, but only when 90%+ of coins are already down.', algo3b: 'Shorts bounces when 80%+ of coins are down.', caprev: 'Neutral Rev, but only after the market is down 1%+ over 24 hours.', flip: 'The opposite of Neutral Rev: long the strongest coins, short the weakest.', revv: 'Neutral Rev with each trade sized by volatility.', r3d: 'Neutral Rev picks with a $25 stop per entry and a 4x to 7x ladder, closed after 24 hours.', r3w: 'The Rev 3 rules, closed after 7 days.', r3m: 'The Rev 3 rules, closed after 30 days.', r3y: 'The Rev 3 rules, closed after a year.' };
+  function series(desk) { return ALL.filter(function (r) { return r.desk === desk && +r.trades_closed > 0; }).sort(function (a, b) { return a.day < b.day ? -1 : 1; }); }
+  function winners() {
+    var last = {}; ALL.forEach(function (r) { if (+r.cum_trades > 0 && (!last[r.desk] || r.day > last[r.desk].day)) last[r.desk] = r; });
+    var all = Object.keys(last).map(function (k) { return last[k]; });
+    return { all: all, up: all.filter(function (r) { return +r.cum_pnl > 0; }).sort(function (a, b) { return +b.cum_pnl - +a.cum_pnl; }) };
+  }
+  function spotDrafts(desk) {
+    var w = winners(), r = w.all.filter(function (x) { return x.desk === desk; })[0], sr = series(desk); if (!r || !sr.length) return [];
+    var name = short(r.desk_name), cum = +r.cum_pnl, days = sr.length, down = w.all.length - w.up.length, rule = RULE[desk] || (name + ' strategy.');
+    var a = build(['Our best paper-trading strategy so far: ' + name + '.', rule, m0(cum) + ' after fees over ' + days + ' day' + (days === 1 ? '' : 's') + ' (' + (+r.cum_trades).toLocaleString('en-US') + ' trades, fees ' + d0(r.cum_fees) + ').'], ['Small sample, fake money.', 'Paper money, not advice.'], true);
+    var b = build([name + ' is up ' + m0(cum) + ' since 14 Oct in our paper-trading race.', down + ' of the ' + w.all.length + ' strategies we run are down.'], ['We have only seen one market phase so far, so this is a test, not proof.', days + ' days is a small sample.', 'Paper money, not advice.'], true);
+    var lines = sr.slice(-4).map(function (x) { return niceDay(x.day).replace(/^\w+,? /, '') + ': ' + m0(x.pnl); });
+    var c = build([name + ', day by day (paper money, after fees):'].concat(lines), ['Total: ' + m0(cum) + '.', 'Paper money, not advice.'], true);
+    return [{ title: 'What it is and how it is doing', note: 'The rule in one line and the result so far.', d: a }, { title: 'With the context', note: 'Says how many strategies lost and that the sample is small.', d: b }, { title: 'Day by day', note: 'The last four days of this strategy.', d: c }];
+  }
+  function spotCard(desk) {
+    var cv = $('cv'); if (!cv) return; var W = 1200, H = 675, c = cv.getContext('2d'), sans = 'system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    var sr = series(desk), w = winners(), r = w.all.filter(function (x) { return x.desk === desk; })[0]; if (!r) return;
+    c.fillStyle = '#0b0f14'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#8b98a8'; c.font = '500 26px ' + sans; c.fillText('Autopilot paper trading · best strategy so far', 56, 70);
+    c.fillStyle = '#e6edf3'; c.font = '700 54px ' + sans; c.fillText(short(r.desk_name), 56, 138);
+    c.fillStyle = +r.cum_pnl >= 0 ? '#3ddc97' : '#ff6b6b'; c.font = '700 84px ' + sans; c.fillText(m0(r.cum_pnl), 56, 238);
+    c.fillStyle = '#8b98a8'; c.font = '500 24px ' + sans; c.fillText('after fees · ' + sr.length + ' day' + (sr.length === 1 ? '' : 's') + ' · ' + (+r.cum_trades).toLocaleString('en-US') + ' trades', 56, 280);
+    var rule = RULE[desk] || '', words = rule.split(' '), line = '', y = 336; c.fillStyle = '#c9d4e0'; c.font = '500 24px ' + sans;
+    words.forEach(function (wd) { var t = line ? line + ' ' + wd : wd; if (c.measureText(t).width > 470) { c.fillText(line, 56, y); y += 34; line = wd; } else line = t; }); if (line) c.fillText(line, 56, y);
+    var bx = 640, bw = 500, by0 = 140, bh = 380, mx = Math.max.apply(null, sr.map(function (x) { return Math.abs(+x.pnl); }).concat([1])), n = Math.max(sr.length, 1), gap = 14, barW = Math.min(90, (bw - gap * (n - 1)) / n), zeroY = by0 + bh / 2, tot = n * barW + (n - 1) * gap, sx = bx + (bw - tot) / 2;
+    c.strokeStyle = '#2b3948'; c.lineWidth = 2; c.beginPath(); c.moveTo(bx - 10, zeroY); c.lineTo(bx + bw + 10, zeroY); c.stroke();
+    c.fillStyle = '#8b98a8'; c.font = '600 20px ' + sans; c.textAlign = 'center'; c.fillText('profit per day', bx + bw / 2, by0 - 24);
+    sr.forEach(function (x, i) { var v = +x.pnl, h = Math.max(3, Math.abs(v) / mx * (bh / 2 - 40)), up = v >= 0, xx = sx + i * (barW + gap); c.fillStyle = up ? '#3ddc97' : '#ff6b6b'; c.fillRect(xx, up ? zeroY - h : zeroY, barW, h); c.font = '700 20px ' + sans; c.fillText(m0(v), xx + barW / 2, up ? zeroY - h - 10 : zeroY + h + 24); c.fillStyle = '#8b98a8'; c.font = '500 18px ' + sans; c.fillText(niceDay(x.day).replace(/^\w+,? /, ''), xx + barW / 2, by0 + bh + 26); });
+    c.textAlign = 'left'; c.fillStyle = '#5b6b7d'; c.font = '500 20px ' + sans; c.fillText(SITE + '  ·  paper money, fees included, not financial advice', 56, H - 34);
+  }
   function copy(t) {
     if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function () { toast('Copied'); }, fb);
     fb(); function fb() { var ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Copied'); } catch (e) { toast('Select the text and copy it'); } ta.remove(); }
   }
   function render() {
-    var rows = ALL.filter(function (r) { return r.day === day; }), ds = drafts(rows, day);
-    $('days').innerHTML = days().map(function (d) { return '<button class="chip" aria-pressed="' + (d === day) + '" data-d="' + d + '">' + niceDay(d) + '</button>'; }).join('');
-    Array.prototype.forEach.call($('days').children, function (b) { b.onclick = function () { day = b.getAttribute('data-d'); render(); }; });
-    if (!ds.length) { $('body').innerHTML = '<div class="card">No closed trades for ' + esc(niceDay(day)) + ' yet. Pick another day.</div>'; return; }
-    var today = day === days()[0];
-    $('body').innerHTML = (today ? '<div class="note">This is the latest day in the snapshots, so the numbers may still change until the day ends (Bangkok time). Post after midnight for a final recap.</div>' : '') +
-      '<h2>Results image</h2><div class="card"><canvas id="cv" width="1200" height="675" aria-label="Bar chart of each strategy\'s profit and loss for the day"></canvas><div class="row"><button class="btn main" id="dl">Download image (PNG)</button><span class="mut">Attach it to the post on X: the draft text does not include the picture.</span></div></div>' +
+    $('modes').innerHTML = [['spot', 'Strategy spotlight'], ['recap', 'Daily recap']].map(function (m) { return '<button class="chip" aria-pressed="' + (mode === m[0]) + '" data-m="' + m[0] + '">' + m[1] + '</button>'; }).join('');
+    Array.prototype.forEach.call($('modes').children, function (b) { b.onclick = function () { mode = b.getAttribute('data-m'); render(); }; });
+    var ds, title, imgFn, intro = '';
+    if (mode === 'spot') {
+      var w = winners();
+      if (!w.up.length) { $('days').innerHTML = ''; $('body').innerHTML = '<div class="card">No strategy is above zero since the start, so there is no winner to feature yet. Use the daily recap, or wait for a better day.</div>'; return; }
+      if (!spotDesk || !w.up.some(function (r) { return r.desk === spotDesk; })) spotDesk = w.up[0].desk;
+      $('days').innerHTML = w.up.slice(0, 6).map(function (r) { return '<button class="chip" aria-pressed="' + (r.desk === spotDesk) + '" data-d="' + r.desk + '">' + esc(short(r.desk_name)) + ' ' + m0(r.cum_pnl) + '</button>'; }).join('');
+      Array.prototype.forEach.call($('days').children, function (b) { b.onclick = function () { spotDesk = b.getAttribute('data-d'); render(); }; });
+      ds = spotDrafts(spotDesk); imgFn = function () { spotCard(spotDesk); };
+      intro = '<div class="note">Only strategies that are up since 14 Oct are listed. The second draft says how many strategies lost and that the sample is small, so a post about the winner does not hide the rest. Keep that line when you edit.</div>';
+    } else {
+      var rows = ALL.filter(function (r) { return r.day === day; }); ds = drafts(rows, day);
+      $('days').innerHTML = days().map(function (d) { return '<button class="chip" aria-pressed="' + (d === day) + '" data-d="' + d + '">' + niceDay(d) + '</button>'; }).join('');
+      Array.prototype.forEach.call($('days').children, function (b) { b.onclick = function () { day = b.getAttribute('data-d'); render(); }; });
+      imgFn = function () { card(rows, day); };
+      if (day === days()[0]) intro = '<div class="note">This is the latest day in the snapshots, so the numbers may still change until the day ends (Bangkok time). Post after midnight for a final recap.</div>';
+    }
+    if (!ds || !ds.length) { $('body').innerHTML = '<div class="card">Nothing to draft for this selection yet. Pick another day or strategy.</div>'; return; }
+    $('body').innerHTML = intro +
+      '<h2>Results image</h2><div class="card"><canvas id="cv" width="1200" height="675" aria-label="Results image for the post"></canvas><div class="row"><button class="btn main" id="dl">Download image (PNG)</button><span class="mut">Attach it to the post on X: the draft text does not include the picture.</span></div></div>' +
       '<h2>Draft posts</h2>' + ds.map(function (x, i) {
         return '<div class="card draft"><h3>' + esc(x.title) + '</h3><p>' + esc(x.note) + '</p><textarea data-i="' + i + '" aria-label="' + esc(x.title) + ' draft">' + esc(x.d.text) + '</textarea><div class="row"><button class="btn main" data-copy="' + i + '">Copy</button><a class="btn" data-x="' + i + '" target="_blank" rel="noopener" href="#">Open in X</a><span class="count" data-n="' + i + '"></span></div></div>';
       }).join('');
-    card(rows, day); $('dl').onclick = dl;
+    imgFn(); $('dl').onclick = dl;
     Array.prototype.forEach.call(document.querySelectorAll('textarea[data-i]'), function (ta) {
       var i = ta.getAttribute('data-i'), n = document.querySelector('[data-n="' + i + '"]'), a = document.querySelector('[data-x="' + i + '"]');
       function upd() { var len = ta.value.replace(new RegExp(SITE.replace(/\./g, '\\.'), 'g'), new Array(LINKLEN + 1).join('x')).length; n.textContent = len + ' / ' + LIMIT; n.className = 'count' + (len > LIMIT ? ' over' : ''); a.href = 'https://x.com/intent/post?text=' + encodeURIComponent(ta.value); }

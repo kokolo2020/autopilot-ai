@@ -19,6 +19,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.30.1
+- Post Drafts: new Strategy spotlight mode (default): features a strategy that is up since the start, with a rule line, a results image, and a draft that states how many strategies lost and that the sample is small; daily recap stays as a second tab
+
 ## v1.30
 - New Post Drafts page (/posts.html): a daily recap for X from the daily snapshots, with a downloadable results image and three editable draft posts (scoreboard, fees lesson, race standings), copy button and Open in X
 
