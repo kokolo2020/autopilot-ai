@@ -5,7 +5,7 @@ fs.mkdirSync('rec', { recursive: true });
 const b = await chromium.launch();
 const ctx = await b.newContext({ viewport: { width: 1280, height: 720 }, recordVideo: { dir: 'rec', size: { width: 1280, height: 720 } } });
 const p = await ctx.newPage();
-await p.goto((process.env.SITE_URL || 'https://ai-autopilot99.netlify.app') + '/?recap=auto&t=' + Date.now(), { waitUntil: 'networkidle' });
+await p.goto((process.env.SITE_URL || 'https://ai-autopilot99.netlify.app') + '/research.html?recap=auto&t=' + Date.now(), { waitUntil: 'networkidle' });
 await p.waitForSelector('#recapMsg:has-text("recording")', { timeout: 60000 });
 await p.waitForTimeout(190000);
 await ctx.close(); await b.close();
