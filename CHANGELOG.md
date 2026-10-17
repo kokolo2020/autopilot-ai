@@ -5,6 +5,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.24.1
+- Research table: green row follows total value (incl. open trades)
+
 ## v1.24
 - Highlight profitable strategies in green (public page and research table)
 
