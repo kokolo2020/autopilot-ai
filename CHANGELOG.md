@@ -7,6 +7,11 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.26
+- Capitulation Rev desk (Rev only after a market drop)
+- Capitulation Rev (`XXX:caprev`): the Neutral Rev batch, but only started when the average 24h change of the scanned coins is -1% or lower; otherwise it waits in cash. Based on a back-test of 2.75 days of ap_samples: Rev made about +$454 per batch after a market drop and -$67 otherwise (one rebound episode, so a hypothesis). Same kill switch, snapshot and research-table wiring as the other new desks.
+
 ## v1.25
 - Three new paper desks: Trend Flip, Risk-balanced Rev, Crash Shorter+
 - Trend Flip (`XXX:flip`): Neutral Rev reversed. Long the 8 strongest, short the 8 weakest by 24h change, $1,250 per leg, 24h hold, no stops. Tests momentum against reversion.

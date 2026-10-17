@@ -49,7 +49,7 @@ create policy "anon read news" on ap_news for select to anon using (true);
 -- One row per day and desk, rewritten until the day is over, so the history survives the live dashboard and can be exported or charted later.
 create table if not exists ap_daily_snapshots (
   day date not null,                 -- Bangkok calendar day
-  desk text not null,                -- aggressive, normal, super, ultra, maker, gated, algo, algo2, algo3, algoq, algow, algox, algot, rev, rev2, revm, flip, revv, algo3b
+  desk text not null,                -- aggressive, normal, super, ultra, maker, gated, algo, algo2, algo3, algoq, algow, algox, algot, rev, rev2, revm, flip, revv, caprev, algo3b
   desk_name text not null,
   snapshot_at timestamptz not null,  -- when the row was last computed (end of day once the day is over)
   trades_closed int not null, wins int not null, win_rate numeric,
