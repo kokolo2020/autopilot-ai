@@ -16,6 +16,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.29.3
+- Research dashboard: premium look (type, spacing, ledger-style tables, connected KPI strip, desk names stay in view when the table scrolls sideways). Looks only, no content or logic changes
+
 ## v1.29.2
 - Rev 3: funding paid or received is booked into each entry's P/L when it closes (OKX funding history, longs pay when the rate is positive); Horizons shows funding per batch
 

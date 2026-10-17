@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="version" content="ap-v1.29.2">
+<meta name="version" content="ap-v1.29.3">
 <title>Autopilot</title>
 <style>
   :root { --bg:#0b0f14; --card:#121922; --card2:#0f151d; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --up:#3ddc97; --down:#ff6b6b; --acc:#6aa9ff; --warn:#f2c14e; --s1:#3987e5; --s2:#d95926; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
@@ -46,10 +46,69 @@
   details { margin-top:8px; } .h2s { color:var(--mut); font-size:12px; letter-spacing:.08em; text-transform:uppercase; font-weight:600; margin:22px 0 8px !important; } .dec > summary { list-style:none; margin:0; display:block; position:relative; padding-left:16px; color:var(--text); font-size:14px; } .dec > summary::-webkit-details-marker { display:none; } .dec > summary::before { content:'▸'; color:var(--mut); position:absolute; left:0; top:0; } .dec[open] > summary::before { content:'▾'; } .dec .when { float:right; color:var(--mut); font-size:12px; } .dec .sum { display:block; color:var(--mut); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; } .dec[open] .sum { display:none; } summary { cursor:pointer; color:var(--mut); font-size:12px; margin-bottom:8px; }
   @media (max-width:600px) { .wrap { padding:12px; } }
 </style>
-<style>.newrow td{background:rgba(245,166,35,.18)}.pos td{background:rgba(61,220,151,.14)!important}.pos td:first-child{box-shadow:inset 4px 0 var(--up)!important}.newrow td:first-child{box-shadow:inset 4px 0 #f5a623}.newb{background:#f5a623;color:#111;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle}</style></head>
+<style>.newrow td{background:rgba(245,166,35,.18)}.pos td{background:rgba(61,220,151,.14)!important}.pos td:first-child{box-shadow:inset 4px 0 var(--up)!important}.newrow td:first-child{box-shadow:inset 4px 0 #f5a623}.newb{background:#f5a623;color:#111;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style id="premium">
+/* Premium skin: looks only. Same markup, same data, same scripts. Ledger idea: figures line up in tabular columns, the table header sits on a ruled line, and the desk names stay visible while the table scrolls sideways. */
+:root { --bg:#090e15; --card:#0f1620; --card2:#0b121a; --line:#1c2735; --text:#e9eef5; --mut:#8a98ab; --up:#34d399; --down:#ff7a70; --acc:#7aa2ff; --warn:#f0a840; --s1:#5b8cff; --s2:#ff8a57; --pos-solid:#143432; --new-solid:#2e2a24; --hover:#131c28; --rule:#cfd8e4; --sans:'Geist',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#eef1f5; --card:#ffffff; --card2:#f6f8fb; --line:#e2e7ee; --text:#0e1a2b; --mut:#5d6c80; --up:#0b8a5f; --down:#c0392b; --acc:#2b50c8; --warn:#b36b00; --s1:#2b5fd6; --s2:#e5622e; --pos-solid:#e2f1ec; --new-solid:#faeedf; --hover:#f3f6fa; --rule:#0e1a2b; } }
+body { font-family:var(--sans); font-size:14px; line-height:1.5; letter-spacing:-.003em; -webkit-font-smoothing:antialiased; font-variant-numeric:tabular-nums; }
+.wrap { max-width:1140px; padding:20px 16px 40px; }
+h1 { font-size:21px; font-weight:650; letter-spacing:.02em; margin:0 0 6px; } h1 small { font-size:12.5px; font-weight:450; letter-spacing:0; color:var(--mut); }
+h2, .h2s { font-size:14px; font-weight:650; letter-spacing:-.005em; text-transform:none; color:var(--text); margin:30px 0 12px !important; }
+h2 .mut { font-weight:450; }
+h3 { font-size:14px; font-weight:650; }
+.sub { font-size:12.5px; line-height:1.6; }
+a { color:var(--acc); text-decoration-thickness:1px; text-underline-offset:2px; } a:hover { text-decoration-thickness:2px; }
+.kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:0; background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+.kpi { background:transparent; border:0; border-radius:0; padding:14px 16px 13px; box-shadow:1px 0 0 var(--line), 0 1px 0 var(--line); }
+.kpi .l { font-size:12px; font-weight:500; letter-spacing:0; text-transform:none; color:var(--mut); }
+.kpi .v { font-family:var(--sans); font-size:26px; font-weight:600; letter-spacing:-.025em; margin-top:4px; line-height:1.15; }
+.kpi .n { font-size:12px; margin-top:4px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; }
+.scroll { border:1px solid var(--line); border-radius:12px; background:var(--card); }
+.card > .scroll { border-radius:10px; }
+table { font-size:13px; }
+th, td { padding:10px 14px; border-bottom:1px solid var(--line); }
+th { background:var(--card); color:var(--mut); font-size:12px; font-weight:550; letter-spacing:0; text-transform:none; border-bottom:1.5px solid var(--rule); }
+td { font-weight:450; } td b { font-weight:620; }
+tbody tr:hover td, tr:hover > td { background:var(--hover); }
+tr:last-child td { border-bottom:0; }
+td.num, th.num { font-variant-numeric:tabular-nums; }
+.up { color:var(--up); } .down { color:var(--down); }
+.pos td { background:var(--pos-solid) !important; } .newrow td { background:var(--new-solid); }
+.pos td:first-child { box-shadow:inset 3px 0 var(--up) !important; } .newrow td:first-child { box-shadow:inset 3px 0 var(--warn); }
+.newb { background:var(--warn); color:#fff; font-size:10.5px; font-weight:650; letter-spacing:.02em; padding:1px 6px; border-radius:6px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .newb { color:#1a1203; } }
+/* desk names stay in view while the figures scroll sideways; the description wraps under the name */
+.scroll table td:first-child, .scroll table th:first-child { position:sticky; left:0; z-index:2; background:var(--card); }
+.scroll table tr.newrow td:first-child { background:var(--new-solid); }
+.scroll table tr.newrow:hover td:first-child { background:var(--hover); }
+.scroll table tr:hover td:first-child { background:var(--hover); }
+.scroll table tr.pos:hover td:first-child { background:var(--pos-solid) !important; }
+.scroll table td:first-child { box-shadow:1px 0 0 var(--line); }
+.scroll table tr.pos td:first-child { box-shadow:inset 3px 0 var(--up), 1px 0 0 var(--line) !important; }
+.scroll table tr.newrow td:first-child { box-shadow:inset 3px 0 var(--warn), 1px 0 0 var(--line); }
+#cmp .scroll table td:first-child { white-space:normal; min-width:168px; max-width:250px; line-height:1.35; padding-top:11px; padding-bottom:11px; }
+#cmp .scroll table td:first-child .mut { display:block; font-size:11.5px; line-height:1.4; margin-top:3px; font-weight:400; }
+#cmp .scroll table th:first-child { white-space:normal; min-width:168px; max-width:250px; }
+.chip { border-radius:8px; padding:5px 12px; font-size:12.5px; font-weight:500; background:var(--card); transition:border-color .12s, color .12s; }
+.chip.on { color:var(--text); border-color:var(--acc); box-shadow:0 0 0 1px var(--acc) inset; }
+details > summary { cursor:pointer; font-weight:550; padding:4px 0; } details > summary:hover { color:var(--acc); }
+.pill { border-radius:6px; padding:1px 8px; font-weight:550; }
+#chart { background:var(--card); }
+.eqlb { font-size:12.5px; } .lbt { font-size:12px; font-weight:550; letter-spacing:0; text-transform:none; }
+.dec { padding:13px 0; } .grid { gap:14px; } .news { font-size:13px; line-height:1.55; }
+.legend { font-size:12.5px; }
+a:focus-visible, .chip:focus-visible, summary:focus-visible, button:focus-visible, th:focus-visible { outline:2px solid var(--acc); outline-offset:2px; border-radius:4px; }
+@media (max-width:600px) { .wrap { padding:14px 12px 32px; } h1 { font-size:19px; } .kpi .v { font-size:22px; } th, td { padding:9px 11px; } #cmp .scroll table td:first-child, #cmp .scroll table th:first-child { min-width:132px; max-width:168px; } }
+@media (prefers-reduced-motion: reduce) { * { transition:none !important; scroll-behavior:auto !important; } }
+</style>
+</head>
 <body>
 <div class="wrap">
-  <h1>AUTOPILOT <small><span id="ver">ap-v1.29.2</span> · top 50 coins · paper money · decided by Claude · runs on the server</small></h1>
+  <h1>AUTOPILOT <small><span id="ver">ap-v1.29.3</span> · top 50 coins · paper money · decided by Claude · runs on the server</small></h1>
   <div class="sub" id="status">loading…</div>
   <div class="kpis" id="kpis"></div>
   <div class="card" id="cmp" style="margin-bottom:10px"></div>
