@@ -3,6 +3,10 @@
 Every push bumps the version. The version shows next to the title on the page, so you can tell which build Netlify is serving.
 
 
+
+## v1.23.2
+- Removed the two empty top-100 rows from the research dashboard (the top-100 track is off).
+
 ## v1.23.1
 - Top-100 research track is switched off by default (the desks stay on the top 50 coins). To run it, set the Netlify environment variable TOP100_ENABLED=1; nothing else needs to change, and the table ap_prices100 is only needed then.
 
