@@ -77,6 +77,11 @@ export function sb(key) {
       const r = await fetch(SB_URL + '/rest/v1/' + table, { method: 'POST', headers: sbHeaders(key, { Prefer: 'return=minimal' }), body: JSON.stringify(rows) });
       if (!r.ok) throw new Error('insertMany ' + table + ' ' + r.status + ' ' + (await r.text()).slice(0, 120));
     },
+    async upsert(table, rows, conflict) {
+      if (!rows.length) return;
+      const r = await fetch(SB_URL + '/rest/v1/' + table + '?on_conflict=' + conflict, { method: 'POST', headers: sbHeaders(key, { Prefer: 'resolution=merge-duplicates,return=minimal' }), body: JSON.stringify(rows) });
+      if (!r.ok) throw new Error('upsert ' + table + ' ' + r.status + ' ' + (await r.text()).slice(0, 120));
+    },
     async update(table, query, patch) {
       const r = await fetch(SB_URL + '/rest/v1/' + table + '?' + query, { method: 'PATCH', headers: sbHeaders(key, { Prefer: 'return=minimal' }), body: JSON.stringify(patch) });
       if (!r.ok) throw new Error('update ' + table + ' ' + r.status + ' ' + (await r.text()).slice(0, 120));

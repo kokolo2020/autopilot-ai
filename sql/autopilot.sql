@@ -44,3 +44,24 @@ alter table ap_news enable row level security;
 create policy "anon read positions" on ap_positions for select to anon using (true);
 create policy "anon read decisions" on ap_decisions for select to anon using (true);
 create policy "anon read news" on ap_news for select to anon using (true);
+
+-- Daily snapshots per desk (Bangkok days), written by netlify/functions/daily.mjs every 30 minutes.
+-- One row per day and desk, rewritten until the day is over, so the history survives the live dashboard and can be exported or charted later.
+create table if not exists ap_daily_snapshots (
+  day date not null,                 -- Bangkok calendar day
+  desk text not null,                -- aggressive, normal, super, ultra, maker, gated, algo, algo2, algo3, algoq, algow, algox, algot, rev, rev2, revm
+  desk_name text not null,
+  snapshot_at timestamptz not null,  -- when the row was last computed (end of day once the day is over)
+  trades_closed int not null, wins int not null, win_rate numeric,
+  pnl numeric not null, fees numeric not null,                 -- that day, closed trades only, pnl is after fees
+  best_trade numeric, worst_trade numeric,
+  day_drawdown numeric,              -- worst peak-to-trough of realized P&L inside the day (0 or negative)
+  cum_trades int not null, cum_pnl numeric not null, cum_fees numeric not null,   -- since the race start
+  peak_cum_pnl numeric not null, max_drawdown numeric not null,                   -- realized, since the race start (max_drawdown is 0 or negative)
+  open_count int not null, open_pnl numeric,                   -- trades still open at snapshot time, after entry fee (null if no prices were found)
+  start_bank numeric not null, total_value numeric not null,   -- total_value = start_bank + cum_pnl + open_pnl, same formula as the dashboard
+  up_60m int, down_60m int, coins int, btc_change24h numeric,  -- market breadth at snapshot time
+  primary key (day, desk)
+);
+alter table ap_daily_snapshots enable row level security;
+create policy "anon read daily" on ap_daily_snapshots for select to anon using (true);

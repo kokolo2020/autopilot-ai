@@ -7,6 +7,11 @@ Every push bumps the version. The version shows next to the title on the page, s
 - The limit twin places leg 1 as a limit order 0.10% better, waits 10 minutes, pays the maker fee on that entry; resets and exits are market (taker). Unfilled legs are cancelled, so fill rate can be compared against the market version.
 - Original Neutral Rev (`:rev`) is unchanged and keeps running as the control. Both new desks are in the kill switch list.
 
+## v1.21
+- Daily snapshots: new table `ap_daily_snapshots` (run the new block at the bottom of `sql/autopilot.sql` in the Supabase SQL editor once) and a new scheduled function `daily.mjs` (every 30 minutes). One row per Bangkok day and desk, for all 16 desks (the 14 existing plus Neutral Rev 2 and its limit twin; a desk only gets rows from its first trade).
+- Each row: trades closed that day, wins, win rate, P&L after fees, fees, best and worst trade, worst intraday drawdown of realized P&L, cumulative trades / P&L / fees since the 18:00 Bangkok 14 Oct start, peak and max drawdown to date, trades still open and their open P&L, total value (same formula as the dashboard), and market breadth (coins up / down over 60 minutes, BTC 24h change).
+- Today and yesterday are rewritten every run, and any earlier day without rows is rebuilt from `ap_positions`, so the table backfills itself from the race start. Each day continues from the previous day's cumulative numbers, so only one day of trades is read at a time. Breadth and open P&L for a backfilled day come from the `ap_samples` rows near that day's end, and are empty if those were already deleted.
+
 ## v1.19
 - Algo v2 desk (stored as `XXX:algo2`): plain rule found by analysing the first 5.7 hours of snapshots. SHORT after a 1.5%+ bounce off the 60 minute low while the last 5 minutes are still rising; take profit 0.6%, stop 0.6%, 30 minute hold, 10 minute cooldown, $250 per coin. A paper forward-test, not a proven edge. Shown as its own row in the desk table.
 
