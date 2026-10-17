@@ -17,7 +17,7 @@ const dayStartMs = (day) => Date.parse(day + 'T00:00:00Z') - BKK;
 const r2 = (x) => (x == null || !isFinite(x) ? null : Math.round(x * 100) / 100);
 
 /* Pure part: turns one day's closed trades, the trades open at snapshot time, and the market rows into 16 snapshot rows. prev = {desk: {cum_trades, cum_pnl, cum_fees, peak, maxDd}} */
-export function buildDay({ day, T, closed, open, samples, prev, samples100 = [] }) {
+export function buildDay({ day, T, closed, open, samples, prev, samples100 = [], old = {} }) {
   const px100 = {}; for (const x of samples100) px100[x.coin] = +x.price;
   const is100 = (id) => id === 'algo100' || id === 'rev100';
   const px = {}, ret = {};
@@ -38,12 +38,13 @@ export function buildDay({ day, T, closed, open, samples, prev, samples100 = [] 
     next[id] = state;
     if (!state.cum_trades && !op.length) continue; // desk did not exist yet
     const pn = tr.map((x) => +x.pnl);
+    const tv = (is100(id) ? START100 * (Object.keys(px100).length || 100) : bank) + cum + (priced ? unr : 0), o = old[id] || {}; // lowest / highest total value over the day: keep what earlier runs saw
     rows.push({
       day, desk: id, desk_name: name, snapshot_at: new Date(T).toISOString(),
       trades_closed: tr.length, wins, win_rate: tr.length ? r2((wins / tr.length) * 100) : null, pnl: r2(pnl), fees: r2(fees),
       best_trade: pn.length ? r2(Math.max(...pn)) : null, worst_trade: pn.length ? r2(Math.min(...pn)) : null, day_drawdown: r2(dDd),
       cum_trades: state.cum_trades, cum_pnl: r2(cum), cum_fees: r2(state.cum_fees), peak_cum_pnl: r2(peak), max_drawdown: r2(maxDd),
-      open_count: op.length, open_pnl: op.length && !priced ? null : r2(unr), start_bank: is100(id) ? START100 * (Object.keys(px100).length || 100) : bank, total_value: r2((is100(id) ? START100 * (Object.keys(px100).length || 100) : bank) + cum + (priced ? unr : 0)),
+      open_count: op.length, open_pnl: op.length && !priced ? null : r2(unr), start_bank: is100(id) ? START100 * (Object.keys(px100).length || 100) : bank, total_value: r2(tv), low_total_value: r2(o.low == null ? tv : Math.min(o.low, tv)), high_total_value: r2(o.high == null ? tv : Math.max(o.high, tv)),
       up_60m: have ? up : null, down_60m: have ? down : null, coins: have ? coins.length : null, btc_change24h: btc && btc.change24h != null ? r2(+btc.change24h) : null
     });
   }
@@ -55,6 +56,8 @@ export async function runDaily(db, now = Date.now()) {
   const have = new Set((await selectAll(db, 'ap_daily_snapshots', 'select=day&order=day.asc').catch(() => [])).map((x) => x.day));
   const days = [];
   for (let ms = dayStartMs(first); ms <= dayStartMs(today); ms += DAY) { const d = bkkDay(ms + 12 * 3600000); if (!have.has(d) || d >= bkkDay(now - DAY)) days.push(d); }
+  const olds = {}; // low / high seen by earlier runs, so a day's lowest point survives each rewrite
+  for (const x of await db.select('ap_daily_snapshots', 'select=day,desk,low_total_value,high_total_value&day=in.(' + days.join(',') + ')').catch(() => [])) (olds[x.day] = olds[x.day] || {})[x.desk] = { low: x.low_total_value == null ? null : +x.low_total_value, high: x.high_total_value == null ? null : +x.high_total_value };
   let prev = null, written = 0;
   for (const d of days) {
     const s0 = Math.max(dayStartMs(d), RACE_START), T = Math.min(now, dayStartMs(d) + DAY - 1), iso = (ms) => new Date(ms).toISOString();
@@ -68,7 +71,7 @@ export async function runDaily(db, now = Date.now()) {
     const samples = await db.select('ap_samples', 'select=coin,price,ret_60m,change24h&ts=lte.' + iso(T) + '&ts=gte.' + iso(T - 20 * 60000) + '&order=ts.desc&limit=300').catch(() => []);
     // the top-100 track only keeps its latest prices, so its open P&L is filled in only for a snapshot taken right now
     const samples100 = now - T < 20 * 60000 ? await db.select('ap_prices100', 'select=coin,price&updated_at=gte.' + iso(now - 20 * 60000)).catch(() => []) : [];
-    const { rows, next } = buildDay({ day: d, T, closed, open, samples, prev, samples100 });
+    const { rows, next } = buildDay({ day: d, T, closed, open, samples, prev, samples100, old: olds[d] || {} });
     await db.upsert('ap_daily_snapshots', rows, 'day,desk');
     written += rows.length; prev = next;
   }

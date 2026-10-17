@@ -60,6 +60,7 @@ create table if not exists ap_daily_snapshots (
   peak_cum_pnl numeric not null, max_drawdown numeric not null,                   -- realized, since the race start (max_drawdown is 0 or negative)
   open_count int not null, open_pnl numeric,                   -- trades still open at snapshot time, after entry fee (null if no prices were found)
   start_bank numeric not null, total_value numeric not null,   -- total_value = start_bank + cum_pnl + open_pnl, same formula as the dashboard
+  low_total_value numeric, high_total_value numeric,           -- lowest and highest total_value seen by the 30-minute snapshots that day (includes open trades); a backfilled day only has its end-of-day point
   up_60m int, down_60m int, coins int, btc_change24h numeric,  -- market breadth at snapshot time
   primary key (day, desk)
 );
@@ -72,3 +73,27 @@ create table if not exists ap_prices100 (
 );
 alter table ap_prices100 enable row level security;
 create policy "anon read prices100" on ap_prices100 for select to anon using (true);
+
+-- Scorecard per desk, built from the daily rows: trade count, how many days were green, best / worst day, drawdowns, and four pass/fail checks.
+-- The thresholds below are starting points, edit them to taste: at least 150 closed trades, at least 7 trading days, 60%+ green days, and no single day worse than -3% or realized drawdown worse than -8% of the start bank.
+create or replace view ap_desk_scorecard with (security_invoker = true) as
+select
+  desk, max(desk_name) as desk_name,
+  count(*) filter (where trades_closed > 0) as trading_days,
+  sum(trades_closed) as trades, round(sum(pnl), 2) as pnl, round(sum(fees), 2) as fees,
+  count(*) filter (where trades_closed > 0 and pnl > 0) as green_days,
+  round(100.0 * count(*) filter (where trades_closed > 0 and pnl > 0) / nullif(count(*) filter (where trades_closed > 0), 0), 0) as green_day_pct,
+  min(pnl) filter (where trades_closed > 0) as worst_day, max(pnl) as best_day,
+  round(avg(pnl) filter (where trades_closed > 0), 2) as avg_day, round(stddev_samp(pnl) filter (where trades_closed > 0), 2) as day_stddev,
+  min(day_drawdown) as worst_intraday_drawdown, min(max_drawdown) as max_drawdown_realized,
+  min(low_total_value) as lowest_total_value, max(start_bank) as start_bank,
+  sum(trades_closed) >= 150 as ok_trades,
+  count(*) filter (where trades_closed > 0) >= 7 as ok_days,
+  coalesce(100.0 * count(*) filter (where trades_closed > 0 and pnl > 0) / nullif(count(*) filter (where trades_closed > 0), 0), 0) >= 60 as ok_consistency,
+  (coalesce(min(pnl) filter (where trades_closed > 0), 0) >= -0.03 * max(start_bank) and min(max_drawdown) >= -0.08 * max(start_bank)) as ok_loss_cap,
+  (sum(trades_closed) >= 150 and count(*) filter (where trades_closed > 0) >= 7
+    and coalesce(100.0 * count(*) filter (where trades_closed > 0 and pnl > 0) / nullif(count(*) filter (where trades_closed > 0), 0), 0) >= 60
+    and coalesce(min(pnl) filter (where trades_closed > 0), 0) >= -0.03 * max(start_bank) and min(max_drawdown) >= -0.08 * max(start_bank) and sum(pnl) > 0) as passes_all
+from ap_daily_snapshots
+group by desk;
+grant select on ap_desk_scorecard to anon;
