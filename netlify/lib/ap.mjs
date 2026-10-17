@@ -6,6 +6,8 @@ export const TOP_N = 50;
 // market-cap order; extras at the end are spares, so 50 stay live if OKX lacks a few
 export const TOP = ['BTC', 'ETH', 'XRP', 'BNB', 'SOL', 'DOGE', 'TRX', 'ADA', 'LINK', 'AVAX', 'SUI', 'XLM', 'BCH', 'HBAR', 'LTC', 'TON', 'DOT', 'UNI', 'AAVE', 'NEAR', 'SHIB', 'PEPE', 'ETC', 'APT', 'ARB', 'OP', 'ATOM', 'FIL', 'ICP', 'INJ', 'TAO', 'ONDO', 'POL', 'CRO', 'ALGO', 'VET', 'TIA', 'SEI', 'RENDER', 'WLD', 'FET', 'ENA', 'JUP', 'PENDLE', 'LDO', 'STX', 'IMX', 'GRT', 'CRV', 'MKR', 'XMR', 'ZEC', 'TRUMP', 'BONK', 'WIF', 'FLOKI'];
 export const COINS = {};
+/* Rev desks only rank the fixed top-50 list, never the dashboard watchlist or coins held open by other desks (stock and ETF perps, thin tokens). Batches 1 and 2 of Neutral Rev ran on this list. */
+export const REV_UNI = new Set(TOP.slice(0, TOP_N));
 export const MAX_SPREAD_BPS = 12;
 /* Four AI desks read the SAME Claude decision and differ only in how easily they act on it. Each has its own $250 per coin.
    Normal ':n', Aggressive '' (the original desk), Super ':s', Ultra ':u'. picks = how many of the biggest movers it may trade. */
@@ -445,7 +447,7 @@ async function rev2Tick(db, rows, openPos, ctl, desk) {
   if (ctlBlocks(ctl, desk, '')) return out;
   const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&notional=eq.' + lev0N + '&order=opened_at.desc&limit=1').catch(() => []))[0];
   if (last && Date.now() - new Date(last.opened_at).getTime() < REV2.holdH * 3600000) return out;
-  const rk = rows.filter((r) => !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
+  const rk = rows.filter((r) => REV_UNI.has(r.coin) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
   if (rk.length < REV2.K * 2 + 4) return out;
   const legs = rk.slice(0, REV2.K).map((r) => [r, 1]).concat(rk.slice(-REV2.K).map((r) => [r, -1]));
   for (const [r, dir] of legs) {
@@ -480,7 +482,7 @@ export async function rev3Tick(db, rows, openPos, ctl, desk) {
   if (ctlBlocks(ctl, desk, '')) return out;
   const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&notional=eq.' + lev0N + '&order=opened_at.desc&limit=1').catch(() => []))[0];
   if (last && Date.now() - new Date(last.opened_at).getTime() < holdH * 3600000) return out;
-  const rk = rows.filter((r) => !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
+  const rk = rows.filter((r) => REV_UNI.has(r.coin) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
   if (rk.length < REV3.K * 2 + 4) return out;
   const legs = rk.slice(0, REV3.K).map((r) => [r, 1]).concat(rk.slice(-REV3.K).map((r) => [r, -1]));
   const deadline = new Date(Date.now() + holdH * 3600000).toISOString(); // one deadline for the whole batch
@@ -569,7 +571,7 @@ async function revTick(db, rows, openRev, ctl) {
   if (ctlBlocks(ctl, 'rev', '')) return out;
   const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*:rev&order=opened_at.desc&limit=1').catch(() => []))[0];
   if (last && Date.now() - new Date(last.opened_at).getTime() < REV.holdH * 3600000) return out;
-  const rk = rows.filter((r) => !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
+  const rk = rows.filter((r) => REV_UNI.has(r.coin) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
   if (rk.length < REV.K * 2 + 4) return out;
   const legs = rk.slice(0, REV.K).map((r) => [r, 1]).concat(rk.slice(-REV.K).map((r) => [r, -1]));
   /* One request inserts the whole batch, so two overlapping runs cannot interleave their legs. If two runs both opened a batch, the first one's 16 legs (lowest ids) stay and the rest are deleted. */
@@ -606,7 +608,7 @@ async function revVariantTick(db, rows, openPos, ctl, desk) {
   if (ctlBlocks(ctl, desk, '')) return out;
   const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&order=opened_at.desc&limit=1').catch(() => []))[0];
   if (last && Date.now() - new Date(last.opened_at).getTime() < REV.holdH * 3600000) return out;
-  const rk = rows.filter((r) => !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
+  const rk = rows.filter((r) => REV_UNI.has(r.coin) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
   if (rk.length < REV.K * 2 + 4) return out;
   if (desk === 'caprev' && mkt24(rk) > CAP_GATE) { out.push('caprev waiting: market 24h ' + mkt24(rk).toFixed(2) + '% > ' + CAP_GATE + '%'); return out; }
   for (const [r, dir, notional] of revVariantLegs(rk, desk)) {
