@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot Post Drafts</title>
+<style>
+  :root { --bg:#0b0f14; --card:#121922; --card2:#0f151d; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --up:#3ddc97; --down:#ff6b6b; --acc:#6aa9ff; --warn:#f5a623; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f4f6f9; --card:#fff; --card2:#f8fafc; --line:#dde3ea; --text:#17202b; --mut:#5b6b7d; --up:#13875a; --down:#c93c3c; --acc:#2563c9; --warn:#b36b00; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:1000px; margin:0 auto; padding:16px; }
+  h1 { font-size:18px; margin:0 0 4px; letter-spacing:.04em; } h1 small { color:var(--mut); font-weight:500; font-size:12px; letter-spacing:0; }
+  h2 { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--mut); margin:22px 0 8px; font-weight:600; }
+  .sub { color:var(--mut); font-size:12px; margin-bottom:14px; } a { color:var(--acc); }
+  .mut { color:var(--mut); } .up { color:var(--up); } .down { color:var(--down); }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; margin:12px 0; }
+  .chip { appearance:none; font:inherit; border:1px solid var(--line); background:var(--card); color:var(--mut); border-radius:99px; padding:5px 13px; cursor:pointer; font-size:12px; }
+  .chip[aria-pressed="true"] { color:var(--text); border-color:var(--acc); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  canvas { width:100%; height:auto; display:block; border-radius:10px; border:1px solid var(--line); }
+  .btn { appearance:none; font:inherit; font-weight:600; font-size:13px; border:1px solid var(--line); background:var(--card2); color:var(--text); border-radius:10px; padding:8px 14px; cursor:pointer; text-decoration:none; display:inline-block; }
+  .btn.main { background:var(--acc); border-color:var(--acc); color:#fff; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+  .draft { margin-bottom:12px; } .draft h3 { margin:0 0 2px; font-size:14px; } .draft p { margin:0 0 8px; font-size:12px; color:var(--mut); }
+  textarea { width:100%; min-height:150px; resize:vertical; background:var(--card2); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .count { font:600 12px var(--mono); margin-left:auto; } .count.over { color:var(--down); }
+  .note { border-left:3px solid var(--warn); padding:8px 12px; background:var(--card2); border-radius:0 8px 8px 0; color:var(--mut); font-size:12px; margin:10px 0; }
+  .toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:8px 14px; border-radius:10px; font-weight:600; font-size:13px; opacity:0; pointer-events:none; transition:opacity .15s; } .toast.on { opacity:1; }
+  @media (max-width:600px) { .wrap { padding:12px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AUTOPILOT POST DRAFTS <small><span id="ver"></span> · for X · paper money</small></h1>
+  <div class="sub">A daily recap written from the daily snapshots: one results image and three draft posts, ready to edit, copy and post. <a href="/research.html">Research dashboard</a> · <a href="/horizons.html">Horizons</a> · <a href="/">Public summary</a></div>
+  <div class="chips" id="days" role="group" aria-label="Day"></div>
+  <div id="body"><div class="card mut">loading…</div></div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<script>
+(function () {
+  var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
+  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
+  var SITE = 'auto-pilotai.netlify.app', FIRST = '2026-10-14', LIMIT = 280, LINKLEN = 23;
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var ALL = [], day = null;
+  function get(t, q) { return fetch(URL_ + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
+  fetch('/version.json?t=' + Date.now()).then(function (r) { return r.json(); }).then(function (v) { $('ver').textContent = 'ap-v' + v.version; }).catch(function () {});
+  function toast(t) { var e = $('toast'); e.textContent = t; e.classList.add('on'); setTimeout(function () { e.classList.remove('on'); }, 1600); }
+  var m0 = function (n) { n = Math.round(+n); return (n < 0 ? '-' : n > 0 ? '+' : '') + '$' + Math.abs(n).toLocaleString('en-US'); };
+  var d0 = function (n) { return '$' + Math.round(+n).toLocaleString('en-US'); };
+  var dayNo = function (d) { return Math.round((Date.parse(d + 'T00:00:00Z') - Date.parse(FIRST + 'T00:00:00Z')) / 86400000) + 1; };
+  var niceDay = function (d) { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }); };
+  var short = function (n) { return String(n).replace('Neutral Reversal', 'Neutral Rev').replace('Neutral Rev 2 limit', 'Rev 2 limit'); };
+
+  /* ---------- text drafts ---------- */
+  function build(req, opt, link) {
+    var lines = req.slice(), add = opt.slice(), tail = (link ? SITE + '\n' : '') + '#papertrading #crypto';
+    function len(ls) { return ls.join('\n').length + 1 + tail.length - (link ? SITE.length - LINKLEN : 0); }
+    while (add.length && len(lines.concat(add)) > LIMIT) add.pop();
+    var out = lines.concat(add);
+    return { text: out.join('\n') + '\n' + tail, len: len(out) };
+  }
+  function drafts(rows, d) {
+    var act = rows.filter(function (r) { return +r.trades_closed > 0; }).sort(function (a, b) { return +b.pnl - +a.pnl; });
+    if (!act.length) return [];
+    var n = dayNo(d), pnl = 0, fees = 0, trades = 0, greens = 0;
+    act.forEach(function (r) { pnl += +r.pnl; fees += +r.fees; trades += +r.trades_closed; if (+r.pnl > 0) greens++; });
+    var gross = pnl + fees, best = act.slice(0, 2), worst = act[act.length - 1];
+    var busiest = act.slice().sort(function (a, b) { return +b.trades_closed - +a.trades_closed; })[0];
+    var head = 'Day ' + n + ' of our paper-trading race (OKX perps, fake money).';
+    var v1 = build([head, greens + ' of ' + act.length + ' strategies finished green.', 'Best: ' + short(best[0].desk_name) + ' ' + m0(best[0].pnl), 'Worst: ' + short(worst.desk_name) + ' ' + m0(worst.pnl)], [best[1] && +best[1].pnl > 0 ? 'Runner-up: ' + short(best[1].desk_name) + ' ' + m0(best[1].pnl) : '', 'Fees paid today: ' + d0(fees) + '.', 'Paper money, not advice.'].filter(Boolean), true);
+    var lessonOpt = [];
+    if (+best[0].trades_closed < +busiest.trades_closed) lessonOpt.push('Best desk: ' + best[0].trades_closed + ' trades. Busiest desk (' + short(busiest.desk_name) + '): ' + busiest.trades_closed + ' trades, ' + m0(busiest.pnl) + '.');
+    lessonOpt.push('Trading less is winning so far.', 'Paper money, not advice.');
+    var v2 = build(['Day ' + n + ' paper-trading lesson: fees.', act.length + ' strategies made ' + trades.toLocaleString('en-US') + ' trades. Before fees: ' + m0(gross) + '. After fees: ' + m0(pnl) + '.', 'Fees cost us ' + d0(fees) + ' today.'], lessonOpt, true);
+    var cum = rows.slice().filter(function (r) { return +r.cum_trades > 0; }).sort(function (a, b) { return +b.cum_pnl - +a.cum_pnl; });
+    var cf = cum.reduce(function (s, r) { return s + +r.cum_fees; }, 0), lead = cum[0], last = cum[cum.length - 1];
+    var v3 = cum.length ? build(['Paper-trading race, day ' + n + '.', 'Leader since 14 Oct: ' + short(lead.desk_name) + ' ' + m0(lead.cum_pnl) + '.', 'Last place: ' + short(last.desk_name) + ' ' + m0(last.cum_pnl) + '.'], [cum.length + ' strategies running on the same coins.', 'Fees paid so far: ' + d0(cf) + '.', 'Paper money, not advice.'], true) : null;
+    return [
+      { title: 'Scoreboard', note: 'Best, worst and how many finished green.', d: v1 },
+      { title: 'Fees lesson', note: 'Gross against net, and who paid the most fees.', d: v2 },
+      v3 ? { title: 'Race standings', note: 'Leader and last place since the start.', d: v3 } : null
+    ].filter(Boolean);
+  }
+
+  /* ---------- results image ---------- */
+  function card(rows, d) {
+    var cv = $('cv'); if (!cv) return;
+    var W = 1200, H = 675, c = cv.getContext('2d'), dark = true;
+    var act = rows.filter(function (r) { return +r.trades_closed > 0; }).sort(function (a, b) { return +b.pnl - +a.pnl; });
+    var pick = act.length > 10 ? act.slice(0, 5).concat(act.slice(-5)) : act;
+    c.fillStyle = '#0b0f14'; c.fillRect(0, 0, W, H);
+    var sans = 'system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    c.fillStyle = '#e6edf3'; c.font = '700 40px ' + sans; c.fillText('Autopilot paper trading', 56, 82);
+    c.fillStyle = '#8b98a8'; c.font = '500 26px ' + sans; c.fillText('Day ' + dayNo(d) + ' · ' + niceDay(d) + ' · profit after fees', 56, 122);
+    var x0 = 300, x1 = 1150, top = 168, rowH = Math.min(46, (H - top - 84) / Math.max(pick.length, 1));
+    var posMax = Math.max.apply(null, pick.map(function (r) { return Math.max(0, +r.pnl); }).concat([1])), negMax = Math.max.apply(null, pick.map(function (r) { return Math.max(0, -r.pnl); }).concat([1]));
+    var zl = x0 + 120, zr = x1 - 120, scale = (zr - zl) / (posMax + negMax), zero = zl + negMax * scale;
+    c.strokeStyle = '#2b3948'; c.lineWidth = 2; c.beginPath(); c.moveTo(zero, top - 10); c.lineTo(zero, top + rowH * pick.length); c.stroke();
+    pick.forEach(function (r, i) {
+      var y = top + i * rowH, v = +r.pnl, w = Math.max(3, Math.abs(v) * scale), up = v >= 0;
+      c.fillStyle = '#c9d4e0'; c.font = '600 22px ' + sans; c.textAlign = 'right'; c.fillText(short(r.desk_name), x0 - 10, y + rowH * 0.62);
+      c.fillStyle = up ? '#3ddc97' : '#ff6b6b'; c.fillRect(up ? zero : zero - w, y + rowH * 0.18, w, rowH * 0.58);
+      c.font = '700 20px ' + sans; c.textAlign = up ? 'left' : 'right';
+      c.fillText(m0(v), up ? zero + w + 10 : zero - w - 10, y + rowH * 0.64);
+    });
+    var g = act.filter(function (r) { return +r.pnl > 0; }).length;
+    c.textAlign = 'right'; c.fillStyle = g ? '#3ddc97' : '#ff6b6b'; c.font = '700 40px ' + sans; c.fillText(g + ' of ' + act.length + ' in profit', W - 56, 82);
+    c.fillStyle = '#8b98a8'; c.font = '500 22px ' + sans; c.fillText('same OKX perpetual coins, fake money', W - 56, 118);
+    c.textAlign = 'left'; c.fillStyle = '#5b6b7d'; c.font = '500 20px ' + sans; c.fillText(SITE + '  ·  paper money, fees included, not financial advice', 56, H - 34);
+  }
+  function dl() { var cv = $('cv'); cv.toBlob(function (b) { var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'autopilot-day-' + dayNo(day) + '.png'; document.body.appendChild(a); a.click(); a.remove(); }, 'image/png'); }
+
+  function copy(t) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function () { toast('Copied'); }, fb);
+    fb(); function fb() { var ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Copied'); } catch (e) { toast('Select the text and copy it'); } ta.remove(); }
+  }
+  function render() {
+    var rows = ALL.filter(function (r) { return r.day === day; }), ds = drafts(rows, day);
+    $('days').innerHTML = days().map(function (d) { return '<button class="chip" aria-pressed="' + (d === day) + '" data-d="' + d + '">' + niceDay(d) + '</button>'; }).join('');
+    Array.prototype.forEach.call($('days').children, function (b) { b.onclick = function () { day = b.getAttribute('data-d'); render(); }; });
+    if (!ds.length) { $('body').innerHTML = '<div class="card">No closed trades for ' + esc(niceDay(day)) + ' yet. Pick another day.</div>'; return; }
+    var today = day === days()[0];
+    $('body').innerHTML = (today ? '<div class="note">This is the latest day in the snapshots, so the numbers may still change until the day ends (Bangkok time). Post after midnight for a final recap.</div>' : '') +
+      '<h2>Results image</h2><div class="card"><canvas id="cv" width="1200" height="675" aria-label="Bar chart of each strategy\'s profit and loss for the day"></canvas><div class="row"><button class="btn main" id="dl">Download image (PNG)</button><span class="mut">Attach it to the post on X: the draft text does not include the picture.</span></div></div>' +
+      '<h2>Draft posts</h2>' + ds.map(function (x, i) {
+        return '<div class="card draft"><h3>' + esc(x.title) + '</h3><p>' + esc(x.note) + '</p><textarea data-i="' + i + '" aria-label="' + esc(x.title) + ' draft">' + esc(x.d.text) + '</textarea><div class="row"><button class="btn main" data-copy="' + i + '">Copy</button><a class="btn" data-x="' + i + '" target="_blank" rel="noopener" href="#">Open in X</a><span class="count" data-n="' + i + '"></span></div></div>';
+      }).join('');
+    card(rows, day); $('dl').onclick = dl;
+    Array.prototype.forEach.call(document.querySelectorAll('textarea[data-i]'), function (ta) {
+      var i = ta.getAttribute('data-i'), n = document.querySelector('[data-n="' + i + '"]'), a = document.querySelector('[data-x="' + i + '"]');
+      function upd() { var len = ta.value.replace(new RegExp(SITE.replace(/\./g, '\\.'), 'g'), new Array(LINKLEN + 1).join('x')).length; n.textContent = len + ' / ' + LIMIT; n.className = 'count' + (len > LIMIT ? ' over' : ''); a.href = 'https://x.com/intent/post?text=' + encodeURIComponent(ta.value); }
+      ta.oninput = upd; upd();
+      document.querySelector('[data-copy="' + i + '"]').onclick = function () { copy(ta.value); };
+    });
+  }
+  function days() { var s = {}; ALL.forEach(function (r) { if (+r.trades_closed > 0) s[r.day] = 1; }); return Object.keys(s).sort().reverse().slice(0, 8); }
+  get('ap_daily_snapshots', 'select=day,desk,desk_name,pnl,fees,trades_closed,win_rate,cum_pnl,cum_fees,cum_trades&order=day.desc&limit=1000').then(function (r) {
+    ALL = r; var ds = days(); if (!ds.length) { $('body').innerHTML = '<div class="card">No daily snapshots yet. They fill in every 30 minutes once the daily function has run.</div>'; return; }
+    day = ds[0]; render();
+  }).catch(function (e) { $('body').innerHTML = '<div class="card down">Could not load the daily snapshots: ' + esc(e.message) + '</div>'; });
+})();
+</script>
+</body>
+</html>

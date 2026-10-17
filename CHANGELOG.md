@@ -18,6 +18,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.30
+- New Post Drafts page (/posts.html): a daily recap for X from the daily snapshots, with a downloadable results image and three editable draft posts (scoreboard, fees lesson, race standings), copy button and Open in X
+
 ## v1.29.4
 - Research dashboard: roll back the premium look to the compact original
 
