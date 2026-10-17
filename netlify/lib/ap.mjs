@@ -440,6 +440,41 @@ async function rev2Tick(db, rows, openPos, ctl, desk) {
   return out;
 }
 
+/* Rev 3 (:r3d daily, :r3w weekly, :r3m monthly, :r3y yearly). Koko's idea: limit the loss on every entry, keep the upside open.
+   Same picks as Neutral Rev (long the 8 weakest, short the 8 strongest by 24h change, one batch, market orders, no take profit), but the stop is a share of the $250 MARGIN, not of the price:
+   10% of margin = $25 per entry, so the price stop is 10% / leverage (2.5% at 4x, 2% at 5x, 1.67% at 6x, 1.43% at 7x). A stopped leg books the loss and reopens the SAME side at the next leverage step (4x -> 5x -> 6x -> 7x, fresh $250 margin each),
+   with the same deadline. After the stop at 7x the leg is done. Worst case per leg is therefore 4 x $25 = $100 plus fees (plus any gap past the stop). At the deadline everything left open is closed at the market; the next batch starts one horizon later.
+   Horizons: daily 24 h, weekly 7 d, monthly 30 d, yearly 365 d. Funding payments on the perps are not modelled. Back-test (42 overlapping 24 h batches, one falling market) favoured the 10% margin stop with the ladder; longer horizons are untested. Forward test. */
+export const REV3 = { K: 8, lev0: 4, levMax: 7, stopMargin: 0.10, hours: { r3d: 24, r3w: 168, r3m: 720, r3y: 8760 } };
+export const rev3Stop = (lev) => REV3.stopMargin / lev;
+export async function rev3Tick(db, rows, openPos, ctl, desk) {
+  const sfx = ':' + desk, holdH = REV3.hours[desk], out = [], lev0N = START * REV3.lev0;
+  for (const p of openPos) {
+    const base = p.coin.split(':')[0], r = rows.find((x) => x.coin === base); if (!r) continue;
+    const x = await manageOpen(db, p, r.m).catch(() => null);
+    if (!x || !x.closed) continue;
+    out.push(p.coin + ' closed ' + x.pnl.toFixed(2) + ' (' + x.why + ')');
+    const lev = rev2Lev(p);
+    if (x.why !== 'stop hit' || lev >= REV3.levMax || new Date(p.max_hold_until).getTime() <= Date.now() || ctlBlocks(ctl, desk, base)) continue;
+    const dir = p.side === 'LONG' ? 1 : -1, m = r.m, nl = lev + 1, notional = START * nl, d = decFor(m.price) + 2, sp = rev3Stop(nl);
+    await db.insert('ap_positions', { coin: p.coin, side: p.side, entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (dir > 0 ? 100 : 0.01)).toFixed(d), sl: +(m.price * (1 - dir * sp)).toFixed(d), max_hold_until: p.max_hold_until });
+    out.push(p.coin + ' reset to ' + nl + 'x');
+  }
+  if (openPos.length) return out;
+  if (ctlBlocks(ctl, desk, '')) return out;
+  const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&notional=eq.' + lev0N + '&order=opened_at.desc&limit=1').catch(() => []))[0];
+  if (last && Date.now() - new Date(last.opened_at).getTime() < holdH * 3600000) return out;
+  const rk = rows.filter((r) => !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
+  if (rk.length < REV3.K * 2 + 4) return out;
+  const legs = rk.slice(0, REV3.K).map((r) => [r, 1]).concat(rk.slice(-REV3.K).map((r) => [r, -1]));
+  for (const [r, dir] of legs) {
+    const m = r.m, d = decFor(m.price) + 2, px = m.price, sp = rev3Stop(REV3.lev0);
+    await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: px, size: lev0N / px, notional: lev0N, tp: +(px * (dir > 0 ? 100 : 0.01)).toFixed(d), sl: +(px * (1 - dir * sp)).toFixed(d), max_hold_until: new Date(Date.now() + holdH * 3600000).toISOString() });
+    out.push(desk + ' opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + r.coin);
+  }
+  return out;
+}
+
 async function algoTick(db, r, openAlgo, closedAlgo, v, breadth, ctl) {
   v = v || 'algo';
   const P = v === 'algow' ? ALGOW : v === 'algox' ? ALGOX : v === 'algo3' ? ALGO3 : v === 'algo3b' ? ALGO3B : v === 'algo2' ? { ...ALGO, cooldownMin: 15 } : ALGO;
@@ -638,6 +673,7 @@ export async function tickAll(env) {
   const openRev = {}; for (const p of openAll) if (p.coin.endsWith(':rev')) openRev[p.coin] = p;
   const openFlip = openAll.filter((p) => p.coin.endsWith(':flip')), openRevv = openAll.filter((p) => p.coin.endsWith(':revv')), openCap = openAll.filter((p) => p.coin.endsWith(':caprev'));
   const openRev2 = openAll.filter((p) => p.coin.endsWith(':rev2')), openRevm = openAll.filter((p) => p.coin.endsWith(':revm'));
+  const openR3 = Object.fromEntries(Object.keys(REV3.hours).map((k) => [k, openAll.filter((p) => p.coin.endsWith(':' + k))]));
   const openSet = new Set(open.map((p) => p.coin)), closedAlgo = {};
   for (const x of await selectAll(db, 'ap_positions', 'select=coin,pnl,closed_at&status=eq.closed&coin=like.*:algo&order=closed_at.desc,id.desc').catch(() => [])) (closedAlgo[x.coin] = closedAlgo[x.coin] || []).push(x);
   for (const x of await selectAll(db, 'ap_positions', 'select=coin,pnl,closed_at&status=eq.closed&coin=like.*:algo2&order=closed_at.desc,id.desc').catch(() => [])) (closedAlgo[x.coin] = closedAlgo[x.coin] || []).push(x);
@@ -654,6 +690,7 @@ export async function tickAll(env) {
   const flipRes = await revVariantTick(db, rows, openFlip, ctl, 'flip').catch((e) => ['flip error ' + String(e.message || e).slice(0, 60)]);
   const revvRes = await revVariantTick(db, rows, openRevv, ctl, 'revv').catch((e) => ['revv error ' + String(e.message || e).slice(0, 60)]);
   const capRes = await revVariantTick(db, rows, openCap, ctl, 'caprev').catch((e) => ['caprev error ' + String(e.message || e).slice(0, 60)]);
+  const r3Res = {}; for (const k of Object.keys(REV3.hours)) r3Res[k] = await rev3Tick(db, rows, openR3[k], ctl, k).catch((e) => [k + ' error ' + String(e.message || e).slice(0, 60)]);
   const carryRes = await carryTick(db, ctl).catch((e) => ['carry error ' + String(e.message || e).slice(0, 80)]);
   const algoRes = await Promise.all(VN.flatMap((v, vi) => rows.map((r) => algoTick(db, r, openAlgo, closedAlgo, v, breadth, ctl).then((s) => r.coin + TAG[vi] + s).catch((e) => r.coin + ' error ' + String(e.message || e).slice(0, 60)))));
   const mirRes = await Promise.all(openMir.map((pp) => { const r = rows.find((x) => x.coin === pp.coin.split(':')[0]); return r ? manageOpen(db, pp, r.m).then((x) => { if (x.closed) cnt[modeOf(pp.coin)]--; return x.closed ? pp.coin + ' closed ' + x.pnl.toFixed(2) : null; }).catch(() => null) : null; }));
@@ -672,7 +709,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = Array.from(openSet).concat(picks).filter((s) => COINS[s]);
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */

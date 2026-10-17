@@ -13,6 +13,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.29
+- Rev 3: four paper desks (daily, weekly, monthly, yearly) with a $25 stop per entry (10% of margin) and the 4x->7x ladder, plus a Horizons page with one tab per horizon
+
 ## v1.28.1
 - Funding Carry: entries now use real executable prices (spot bought at the ask, perp shorted at the bid) and marks use the exit side (spot at the bid, perp at the ask). Before, it used last-trade prices, which for thin coins can be minutes apart between spot and perp and showed up as fake price drift of up to -$0.56 per coin.
 - Many coins sit at the same 0.01% base funding rate, so ties (to 0.001%) are now broken by the tightest combined spot + perp spread, and coins with combined spread above 0.2% are skipped.

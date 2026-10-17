@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot Horizons</title>
+<style>
+  :root { --bg:#0b0f14; --card:#121922; --card2:#0f151d; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --up:#3ddc97; --down:#ff6b6b; --acc:#6aa9ff; --warn:#f5a623; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f4f6f9; --card:#fff; --card2:#f8fafc; --line:#dde3ea; --text:#17202b; --mut:#5b6b7d; --up:#13875a; --down:#c93c3c; --acc:#2563c9; --warn:#b36b00; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:16px; }
+  h1 { font-size:18px; margin:0 0 4px; letter-spacing:.04em; } h1 small { color:var(--mut); font-weight:500; font-size:12px; letter-spacing:0; }
+  h2 { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--mut); margin:22px 0 8px; font-weight:600; }
+  .sub { color:var(--mut); font-size:12px; margin-bottom:14px; } a { color:var(--acc); }
+  .mut { color:var(--mut); } .up { color:var(--up); } .down { color:var(--down); } .mono { font-family:var(--mono); }
+  .tabs { display:flex; gap:8px; flex-wrap:wrap; margin:14px 0; }
+  .tab { appearance:none; border:1px solid var(--line); background:var(--card); color:var(--mut); border-radius:12px; padding:10px 16px; font:600 14px system-ui; cursor:pointer; min-width:120px; text-align:left; }
+  .tab small { display:block; font:500 12px var(--mono); margin-top:2px; }
+  .tab[aria-selected="true"] { color:var(--text); border-color:var(--acc); box-shadow:0 0 0 1px var(--acc) inset; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .kpi .l { color:var(--mut); font-size:11px; letter-spacing:.06em; text-transform:uppercase; } .kpi .v { font:650 22px var(--mono); margin-top:2px; } .kpi .n { color:var(--mut); font-size:11px; margin-top:2px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .scroll { overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--card); }
+  table { border-collapse:collapse; width:100%; min-width:760px; font-size:13px; }
+  th, td { padding:8px 10px; text-align:right; white-space:nowrap; border-bottom:1px solid var(--line); }
+  th:first-child, td:first-child { text-align:left; } th { color:var(--mut); font-weight:600; font-size:11px; letter-spacing:.05em; text-transform:uppercase; }
+  tr:last-child td { border-bottom:0; } td.coin { font-weight:650; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; border:1px solid var(--line); font-size:11px; color:var(--mut); }
+  .pill.LONG { color:var(--up); border-color:var(--up); } .pill.SHORT { color:var(--down); border-color:var(--down); }
+  .pos td { background:rgba(61,220,151,.12); } .pos td:first-child { box-shadow:inset 4px 0 var(--up); }
+  .newb { background:var(--warn); color:#111; font-size:10px; font-weight:700; border-radius:4px; padding:1px 5px; vertical-align:1px; }
+  .note { border-left:3px solid var(--warn); padding:8px 12px; background:var(--card2); border-radius:0 8px 8px 0; color:var(--mut); font-size:12px; margin:10px 0; }
+  .ladder { font:600 11px var(--mono); }
+  @media (max-width:600px) { .wrap { padding:12px; } .tab { min-width:calc(50% - 4px); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AUTOPILOT HORIZONS <span class="newb">NEW</span> <small><span id="ver"></span> · Rev 3 · paper money</small></h1>
+  <div class="sub">One strategy, four time horizons. Each batch goes long the 8 weakest and short the 8 strongest coins (24h change) with $250 margin per leg, starts at 4x, and every entry carries a <b>$25 stop</b> (10% of margin). A stopped leg reopens on the same side at 5x, then 6x, then 7x, then it is done. Whatever is left open is closed at the horizon. <a href="/research.html">Research dashboard</a> · <a href="/">Public summary</a></div>
+  <div class="note">Back-test (42 overlapping 24h batches, one falling market) favoured this rule. The weekly, monthly and yearly versions are untested guesses. A $25 stop is a tight stop over a long horizon, so expect legs to finish early and the long horizons to behave very differently from the daily one. Funding payments are not modelled. Paper only, nothing here places real orders.</div>
+  <div class="tabs" id="tabs" role="tablist"></div>
+  <div id="body"><div class="card mut">loading…</div></div>
+</div>
+<script>
+(function () {
+  var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
+  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
+  var FEE = 0.00055, MARGIN = 250, LEGS = 16;
+  var H = [['r3d', 'Daily', '24 hours'], ['r3w', 'Weekly', '7 days'], ['r3m', 'Monthly', '30 days'], ['r3y', 'Yearly', '365 days']];
+  var cur = 'r3d', P = [], px = {}, tabSaved = null;
+  try { tabSaved = localStorage.getItem('ap-horizon'); } catch (e) {}
+  if (tabSaved && H.some(function (h) { return h[0] === tabSaved; })) cur = tabSaved;
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var money = function (n) { return (n < 0 ? '-' : n > 0 ? '+' : '') + '$' + Math.abs(n).toFixed(2); };
+  var cls = function (n) { return n > 0.005 ? 'up' : n < -0.005 ? 'down' : 'mut'; };
+  var pxf = function (p) { p = +p; return p >= 1000 ? p.toFixed(1) : p >= 10 ? p.toFixed(3) : p >= 1 ? p.toFixed(4) : p.toFixed(6); };
+  var when = function (iso) { var d = new Date(new Date(iso).getTime() + 7 * 3600000); return d.toISOString().slice(5, 16).replace('T', ' ') + ' BKK'; };
+  function left(ms) { if (ms <= 0) return 'due now'; var m = Math.round(ms / 60000); return m < 90 ? m + ' min' : m < 2880 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' days'; }
+  function get(t, q) { return fetch(URL_ + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
+  fetch('/version.json?t=' + Date.now()).then(function (r) { return r.json(); }).then(function (v) { $('ver').textContent = 'ap-v' + v.version; }).catch(function () {});
+
+  /* open mark = what the entry would book if closed now (both fees) */
+  function entryNet(p) {
+    if (p.status === 'closed') return +p.pnl || 0;
+    var l = px[p.coin.split(':')[0]], n = +p.notional, e = +p.entry_price; if (l == null || !e) return 0;
+    return n * (p.side === 'LONG' ? 1 : -1) * (l - e) / e - n * FEE * 2;
+  }
+  function batches(desk) {
+    var by = {};
+    P.filter(function (p) { return p.coin.slice(-4) === ':' + desk; }).forEach(function (p) { (by[p.max_hold_until] = by[p.max_hold_until] || []).push(p); });
+    return Object.keys(by).map(function (k) {
+      var list = by[k].sort(function (a, b) { return a.opened_at < b.opened_at ? -1 : 1; }), coins = {};
+      list.forEach(function (p) { var c = p.coin.split(':')[0]; (coins[c] = coins[c] || []).push(p); });
+      var legs = Object.keys(coins).map(function (c) {
+        var es = coins[c], last = es[es.length - 1], lev = Math.round(+last.notional / MARGIN), real = 0, unr = 0, stops = 0, fees = 0;
+        es.forEach(function (p) { if (p.status === 'closed') { real += +p.pnl || 0; fees += +p.fees || 0; if (p.close_reason === 'stop hit') stops++; } else unr += entryNet(p); });
+        return { coin: c, side: last.side, lev: lev, entries: es.length, stops: stops, open: last.status === 'open', last: last, real: real, unr: unr, net: real + unr, fees: fees, why: last.close_reason };
+      }).sort(function (a, b) { return b.net - a.net; });
+      var start = list.filter(function (p) { return Math.round(+p.notional / MARGIN) === 4; }).map(function (p) { return p.opened_at; }).sort()[0] || list[0].opened_at;
+      return { deadline: k, start: start, legs: legs, live: legs.some(function (l) { return l.open; }) || new Date(k).getTime() > Date.now(), real: sum(legs, 'real'), unr: sum(legs, 'unr'), net: sum(legs, 'net'), fees: sum(legs, 'fees'), stops: sum(legs, 'stops'), entries: sum(legs, 'entries') };
+    }).sort(function (a, b) { return a.start < b.start ? 1 : -1; });
+  }
+  function sum(a, k) { return a.reduce(function (s, x) { return s + x[k]; }, 0); }
+
+  function tabs() {
+    $('tabs').innerHTML = H.map(function (h) {
+      var bs = batches(h[0]), tot = sum(bs, 'net');
+      return '<button class="tab" role="tab" data-d="' + h[0] + '" aria-selected="' + (h[0] === cur) + '">' + h[1] + '<small class="' + cls(tot) + '">' + (bs.length ? money(tot) : 'no batch yet') + '</small></button>';
+    }).join('');
+    Array.prototype.forEach.call($('tabs').children, function (b) { b.onclick = function () { cur = b.getAttribute('data-d'); try { localStorage.setItem('ap-horizon', cur); } catch (e) {} render(); }; });
+  }
+  function render() {
+    tabs();
+    var h = H.filter(function (x) { return x[0] === cur; })[0], bs = batches(cur), b = bs[0];
+    if (!b) { $('body').innerHTML = '<div class="card"><b>' + h[1] + ' Rev 3</b> has no batch yet. The server opens one on its next 5 minute run after this version is live (' + h[2] + ' per batch).</div>'; return; }
+    var live = b.live, base = MARGIN * LEGS, done = bs.filter(function (x) { return !x.live; }), allNet = sum(bs, 'net');
+    var k = '<div class="kpis">' +
+      '<div class="kpi"><div class="l">Current batch</div><div class="v ' + cls(b.net) + '">' + money(b.net) + '</div><div class="n">' + (b.net / base * 100).toFixed(2) + '% of $' + base.toLocaleString() + ' base margin</div></div>' +
+      '<div class="kpi"><div class="l">' + (live ? 'Closes in' : 'Closed') + '</div><div class="v">' + (live ? left(new Date(b.deadline).getTime() - Date.now()) : 'done') + '</div><div class="n">started ' + when(b.start) + '</div></div>' +
+      '<div class="kpi"><div class="l">Legs open now</div><div class="v">' + b.legs.filter(function (l) { return l.open; }).length + ' / ' + LEGS + '</div><div class="n">' + b.stops + ' stops hit, ' + b.entries + ' entries</div></div>' +
+      '<div class="kpi"><div class="l">Booked / open</div><div class="v" style="font-size:16px"><span class="' + cls(b.real) + '">' + money(b.real) + '</span> <span class="mut">/</span> <span class="' + cls(b.unr) + '">' + money(b.unr) + '</span></div><div class="n">fees so far $' + b.fees.toFixed(2) + ' (open entries priced with both fees)</div></div>' +
+      '<div class="kpi"><div class="l">All ' + h[1].toLowerCase() + ' batches</div><div class="v ' + cls(allNet) + '">' + money(allNet) + '</div><div class="n">' + bs.length + ' batch' + (bs.length === 1 ? '' : 'es') + ', ' + done.length + ' finished</div></div></div>';
+    var rows = b.legs.map(function (l) {
+      var lv = px[l.coin], state = l.open ? '<span class="ladder">open · ' + l.lev + 'x</span>' : l.why === 'stop hit' ? '<span class="ladder down">stopped out at ' + l.lev + 'x · done</span>' : '<span class="ladder mut">closed at deadline</span>';
+      return '<tr' + (l.net > 0 ? ' class="pos"' : '') + '><td class="coin">' + esc(l.coin) + ' <span class="pill ' + l.side + '">' + l.side + '</span></td><td>' + state + '</td><td class="mono">' + l.entries + '</td><td class="mono">' + pxf(l.last.entry_price) + '</td><td class="mono">' + (lv == null ? '–' : pxf(lv)) + '</td><td class="mono ' + cls(l.real) + '">' + (l.entries > 1 || !l.open ? money(l.real) : '–') + '</td><td class="mono ' + cls(l.unr) + '">' + (l.open ? money(l.unr) : '–') + '</td><td class="mono ' + cls(l.net) + '"><b>' + money(l.net) + '</b></td></tr>';
+    }).join('');
+    var hist = bs.map(function (x) {
+      var win = x.legs.filter(function (l) { return l.net > 0; }).length;
+      return '<tr' + (x.net > 0 && !x.live ? ' class="pos"' : '') + '><td>' + when(x.start) + (x.live ? ' <span class="pill">running</span>' : '') + '</td><td class="mono">' + x.legs.length + '</td><td class="mono">' + x.entries + '</td><td class="mono">' + x.stops + '</td><td class="mono">' + win + ' / ' + x.legs.length + '</td><td class="mono">$' + x.fees.toFixed(2) + '</td><td class="mono ' + cls(x.net) + '"><b>' + money(x.net) + '</b></td></tr>';
+    }).join('');
+    $('body').innerHTML = k +
+      '<h2>' + h[1] + ' · ' + (live ? 'current batch, ' : 'latest batch, ') + b.legs.length + ' legs <span class="mut" style="text-transform:none;letter-spacing:0">· each row is one coin: booked = stopped entries, open = the entry still running</span></h2>' +
+      '<div class="scroll"><table><tr><th>Coin</th><th>State</th><th>Entries</th><th>Entry (latest)</th><th>Live</th><th>Booked</th><th>Open</th><th>Net</th></tr>' + rows + '</table></div>' +
+      '<h2>All ' + h[1].toLowerCase() + ' batches</h2><div class="scroll"><table style="min-width:620px"><tr><th>Started</th><th>Legs</th><th>Entries</th><th>Stops</th><th>Winning legs</th><th>Fees</th><th>Net</th></tr>' + hist + '</table></div>';
+  }
+  function load() {
+    var or = 'or=(' + H.map(function (h) { return 'coin.like.*:' + h[0]; }).join(',') + ')';
+    Promise.all([get('ap_positions', 'select=*&' + or + '&order=opened_at.desc&limit=5000'), get('ap_samples', 'select=coin,price,ts&order=ts.desc&limit=400')]).then(function (r) {
+      P = r[0]; px = {}; r[1].forEach(function (x) { if (px[x.coin] == null) px[x.coin] = +x.price; }); render();
+    }).catch(function (e) { $('body').innerHTML = '<div class="card down">Could not load data: ' + esc(e.message) + '</div>'; });
+  }
+  load(); setInterval(load, 60000);
+})();
+</script>
+</body>
+</html>

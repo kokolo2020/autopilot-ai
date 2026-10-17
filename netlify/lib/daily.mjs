@@ -8,9 +8,9 @@ const DAY = 86400000, BKK = 7 * 3600000;
 export const DESKS = [
   ['aggressive', 'Aggressive AI'], ['normal', 'Normal AI'], ['super', 'Super AI'], ['ultra', 'Ultra AI'], ['maker', 'Maker AI'], ['gated', 'Gated AI'],
   ['algo', 'Algo'], ['algo2', 'Algo v2'], ['algo3', 'Algo v3'], ['algoq', 'Quiet-hours Algo'], ['algow', 'Wild Algo'], ['algox', 'Extra-wild Algo'], ['algot', 'Algo Top10'],
-  ['rev', 'Neutral Reversal'], ['rev2', 'Neutral Rev 2'], ['revm', 'Neutral Rev 2 limit'], ['flip', 'Trend Flip'], ['revv', 'Risk-balanced Rev'], ['caprev', 'Capitulation Rev'], ['algo3b', 'Crash Shorter+'], ['algo100', 'Algo top 100 ($100)'], ['rev100', 'Neutral Rev top 100 ($100)']
+  ['rev', 'Neutral Reversal'], ['rev2', 'Neutral Rev 2'], ['revm', 'Neutral Rev 2 limit'], ['flip', 'Trend Flip'], ['revv', 'Risk-balanced Rev'], ['caprev', 'Capitulation Rev'], ['algo3b', 'Crash Shorter+'], ['r3d', 'Rev 3 daily'], ['r3w', 'Rev 3 weekly'], ['r3m', 'Rev 3 monthly'], ['r3y', 'Rev 3 yearly'], ['algo100', 'Algo top 100 ($100)'], ['rev100', 'Neutral Rev top 100 ($100)']
 ];
-const SUFFIX = { n: 'normal', s: 'super', u: 'ultra', m: 'maker', g: 'gated', algo: 'algo', algo2: 'algo2', algo3: 'algo3', algoq: 'algoq', algow: 'algow', algox: 'algox', algot: 'algot', rev: 'rev', rev2: 'rev2', revm: 'revm', flip: 'flip', revv: 'revv', caprev: 'caprev', algo3b: 'algo3b', algo100: 'algo100', rev100: 'rev100' };
+const SUFFIX = { n: 'normal', s: 'super', u: 'ultra', m: 'maker', g: 'gated', algo: 'algo', algo2: 'algo2', algo3: 'algo3', algoq: 'algoq', algow: 'algow', algox: 'algox', algot: 'algot', rev: 'rev', rev2: 'rev2', revm: 'revm', flip: 'flip', revv: 'revv', caprev: 'caprev', algo3b: 'algo3b', r3d: 'r3d', r3w: 'r3w', r3m: 'r3m', r3y: 'r3y', algo100: 'algo100', rev100: 'rev100' };
 export const deskOf = (coin) => (coin.includes(':') ? SUFFIX[coin.split(':')[1]] || null : 'aggressive');
 export const bkkDay = (ms) => new Date(ms + BKK).toISOString().slice(0, 10);
 const dayStartMs = (day) => Date.parse(day + 'T00:00:00Z') - BKK;
