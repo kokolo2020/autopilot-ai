@@ -46,7 +46,7 @@
   var SITE = 'auto-pilotai.netlify.app', FIRST = '2026-10-14', LIMIT = 280, LINKLEN = 23;
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
-  var ALL = [], day = null, mode = 'spot', spotDesk = null;
+  var ALL = [], day = null, mode = 'spot', spotDesk = null, POS = null, LIVE = {}, bDesk = 'rev', bIdx = 0;
   function get(t, q) { return fetch(URL_ + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
   fetch('/version.json?t=' + Date.now()).then(function (r) { return r.json(); }).then(function (v) { $('ver').textContent = 'ap-v' + v.version; }).catch(function () {});
   function toast(t) { var e = $('toast'); e.textContent = t; e.classList.add('on'); setTimeout(function () { e.classList.remove('on'); }, 1600); }
@@ -113,7 +113,7 @@
     c.fillStyle = '#8b98a8'; c.font = '500 22px ' + sans; c.fillText('same OKX perpetual coins, fake money', W - 56, 118);
     c.textAlign = 'left'; c.fillStyle = '#5b6b7d'; c.font = '500 20px ' + sans; c.fillText(SITE + '  ·  paper money, fees included, not financial advice', 56, H - 34);
   }
-  function dl() { var cv = $('cv'); cv.toBlob(function (b) { var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = mode === 'spot' ? 'autopilot-' + spotDesk + '.png' : 'autopilot-day-' + dayNo(day) + '.png'; document.body.appendChild(a); a.click(); a.remove(); }, 'image/png'); }
+  function dl() { var cv = $('cv'); cv.toBlob(function (b) { var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = mode === 'batch' ? 'autopilot-' + bDesk + '-batch.png' : mode === 'spot' ? 'autopilot-' + spotDesk + '.png' : 'autopilot-day-' + dayNo(day) + '.png'; document.body.appendChild(a); a.click(); a.remove(); }, 'image/png'); }
 
 
   /* ---------- strategy spotlight ---------- */
@@ -149,15 +149,72 @@
     sr.forEach(function (x, i) { var v = +x.pnl, h = Math.max(3, Math.abs(v) / mx * (bh / 2 - 40)), up = v >= 0, xx = sx + i * (barW + gap); c.fillStyle = up ? '#3ddc97' : '#ff6b6b'; c.fillRect(xx, up ? zeroY - h : zeroY, barW, h); c.font = '700 20px ' + sans; c.fillText(m0(v), xx + barW / 2, up ? zeroY - h - 10 : zeroY + h + 24); c.fillStyle = '#8b98a8'; c.font = '500 18px ' + sans; c.fillText(niceDay(x.day).replace(/^\w+,? /, ''), xx + barW / 2, by0 + bh + 26); });
     c.textAlign = 'left'; c.fillStyle = '#5b6b7d'; c.font = '500 20px ' + sans; c.fillText(SITE + '  ·  paper money, fees included, not financial advice', 56, H - 34);
   }
+
+  /* ---------- batch card: every coin of one batch with entry, exit and P/L ---------- */
+  var BDESKS = [['rev', 'Neutral Rev'], ['rev2', 'Rev 2'], ['r3d', 'Rev 3 daily']], FEE = 0.00055;
+  var pxf = function (p) { return String(Number((+p).toPrecision(5))); };
+  function batchesOf(desk) {
+    var mine = (POS || []).filter(function (p) { return p.coin.slice(-(desk.length + 1)) === ':' + desk; }).sort(function (a, b) { return new Date(a.max_hold_until) - new Date(b.max_hold_until); }), groups = [], lastT = null;
+    mine.forEach(function (p) { var t = new Date(p.max_hold_until).getTime(); if (lastT === null || t - lastT > 600000) groups.push([]); groups[groups.length - 1].push(p); lastT = t; });
+    return groups.map(function (g, gi) {
+      var by = {}; g.sort(function (a, b) { return a.opened_at < b.opened_at ? -1 : 1; }).forEach(function (p) { var c = p.coin.split(':')[0]; (by[c] = by[c] || []).push(p); });
+      var legs = Object.keys(by).map(function (c) {
+        var es = by[c], first = es[0], last = es[es.length - 1], open = last.status === 'open', live = LIVE[c], pnl = 0;
+        es.forEach(function (p) { if (p.status === 'closed') pnl += +p.pnl || 0; else if (live != null) pnl += (+p.notional) * (p.side === 'LONG' ? 1 : -1) * (live - +p.entry_price) / +p.entry_price - (+p.notional) * FEE * 2; });
+        return { coin: c, side: first.side, entry: +first.entry_price, exit: open ? live : +last.exit_price, open: open, pnl: pnl, n: es.length };
+      });
+      return { no: gi + 1, start: g[0].opened_at, deadline: g[g.length - 1].max_hold_until, legs: legs, open: legs.some(function (l) { return l.open; }), total: legs.reduce(function (s, l) { return s + l.pnl; }, 0) };
+    }).reverse();
+  }
+  function batchDraft(desk, b) {
+    var nm = (BDESKS.filter(function (d) { return d[0] === desk; })[0] || [0, desk])[1], sh = b.legs.filter(function (l) { return l.side === 'SHORT'; }), lg = b.legs.filter(function (l) { return l.side === 'LONG'; });
+    var sum = function (a) { return a.reduce(function (s, l) { return s + l.pnl; }, 0); }, sorted = b.legs.slice().sort(function (x, y) { return y.pnl - x.pnl; });
+    var head = nm + ', batch ' + b.no + (b.open ? ' (still open): ' : ': ') + m0(b.total) + ' after fees.';
+    var r = build([head, 'Short the strongest: ' + m0(sum(sh)) + '. Long the weakest: ' + m0(sum(lg)) + '.'], ['Best: ' + sorted[0].coin + ' ' + m0(sorted[0].pnl) + '. Worst: ' + sorted[sorted.length - 1].coin + ' ' + m0(sorted[sorted.length - 1].pnl) + '.', 'Every coin, entry and exit in the image.', 'Paper money, not advice.'], true);
+    return [{ title: 'Batch result', note: 'Totals for the short and long side, best and worst coin.', d: r }];
+  }
+  function batchCard(b, desk) {
+    var cv = $('cv'); if (!cv) return; var W = 1200, H = 675, c = cv.getContext('2d'), sans = 'system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    var nm = (BDESKS.filter(function (d) { return d[0] === desk; })[0] || [0, desk])[1];
+    c.fillStyle = '#0b0f14'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#e6edf3'; c.font = '700 40px ' + sans; c.textAlign = 'left'; c.fillText(nm + ' · batch ' + b.no, 56, 70);
+    var d0_ = new Date(b.start).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' });
+    c.fillStyle = '#8b98a8'; c.font = '500 22px ' + sans; c.fillText('Opened ' + d0_ + ' · ' + (b.open ? 'still open, live prices' : 'closed after 24 hours') + ' · profit after fees', 56, 106);
+    c.textAlign = 'right'; c.fillStyle = b.total >= 0 ? '#3ddc97' : '#ff6b6b'; c.font = '700 66px ' + sans; c.fillText(m0(b.total), W - 56, 84);
+    var cols = [['Short the strongest coins', b.legs.filter(function (l) { return l.side === 'SHORT'; })], ['Long the weakest coins', b.legs.filter(function (l) { return l.side === 'LONG'; })]], cw = 520, xs = [56, 624], top = 150;
+    var rows = Math.max(cols[0][1].length, cols[1][1].length, 1), rowH = Math.min(46, (H - top - 120) / rows);
+    cols.forEach(function (col, ci) {
+      var x = xs[ci], tot = col[1].reduce(function (s, l) { return s + l.pnl; }, 0);
+      c.textAlign = 'left'; c.fillStyle = '#c9d4e0'; c.font = '600 22px ' + sans; c.fillText(col[0], x, top + 12);
+      c.textAlign = 'right'; c.fillStyle = tot >= 0 ? '#3ddc97' : '#ff6b6b'; c.font = '700 22px ' + sans; c.fillText(m0(tot), x + cw, top + 12);
+      c.strokeStyle = '#2b3948'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, top + 26); c.lineTo(x + cw, top + 26); c.stroke();
+      col[1].sort(function (a, b2) { return b2.pnl - a.pnl; }).forEach(function (l, i) {
+        var y = top + 34 + i * rowH, mid = y + rowH * 0.66, up = l.pnl >= 0;
+        if (i % 2 === 0) { c.fillStyle = 'rgba(255,255,255,.03)'; c.fillRect(x - 8, y, cw + 16, rowH); }
+        c.textAlign = 'left'; c.fillStyle = '#e6edf3'; c.font = '700 22px ' + sans; c.fillText(l.coin + (l.n > 1 ? ' ×' + l.n : ''), x, mid);
+        c.fillStyle = '#8b98a8'; c.font = '500 19px ' + sans; c.fillText(pxf(l.entry) + ' → ' + (l.exit == null ? '–' : pxf(l.exit)), x + 140, mid);
+        c.textAlign = 'right'; c.fillStyle = up ? '#3ddc97' : '#ff6b6b'; c.font = '700 22px ' + sans; c.fillText(m0(l.pnl).replace(/^([+-]\$\d+)$/, '$1'), x + cw, mid);
+      });
+    });
+    c.textAlign = 'left'; c.fillStyle = '#5b6b7d'; c.font = '500 19px ' + sans; c.fillText('Entry → exit price' + (b.open ? ' (live)' : '') + ' · ' + SITE + ' · paper money, fees included, not financial advice', 56, H - 30);
+  }
   function copy(t) {
     if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function () { toast('Copied'); }, fb);
     fb(); function fb() { var ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Copied'); } catch (e) { toast('Select the text and copy it'); } ta.remove(); }
   }
   function render() {
-    $('modes').innerHTML = [['spot', 'Strategy spotlight'], ['recap', 'Daily recap']].map(function (m) { return '<button class="chip" aria-pressed="' + (mode === m[0]) + '" data-m="' + m[0] + '">' + m[1] + '</button>'; }).join('');
+    $('modes').innerHTML = [['spot', 'Strategy spotlight'], ['batch', 'Batch card'], ['recap', 'Daily recap']].map(function (m) { return '<button class="chip" aria-pressed="' + (mode === m[0]) + '" data-m="' + m[0] + '">' + m[1] + '</button>'; }).join('');
     Array.prototype.forEach.call($('modes').children, function (b) { b.onclick = function () { mode = b.getAttribute('data-m'); render(); }; });
     var ds, title, imgFn, intro = '';
-    if (mode === 'spot') {
+    if (mode === 'batch') {
+      if (!POS) { $('days').innerHTML = ''; $('body').innerHTML = '<div class="card mut">loading batches…</div>'; loadPos(); return; }
+      var bs = batchesOf(bDesk); if (bIdx >= bs.length) bIdx = 0;
+      $('days').innerHTML = BDESKS.map(function (d) { return '<button class="chip" aria-pressed="' + (d[0] === bDesk) + '" data-bd="' + d[0] + '">' + d[1] + '</button>'; }).join('') + bs.slice(0, 5).map(function (b, i) { return '<button class="chip" aria-pressed="' + (i === bIdx) + '" data-bi="' + i + '">Batch ' + b.no + (b.open ? ' (open)' : '') + '</button>'; }).join('');
+      Array.prototype.forEach.call($('days').children, function (b) { b.onclick = function () { if (b.getAttribute('data-bd')) { bDesk = b.getAttribute('data-bd'); bIdx = 0; } else bIdx = +b.getAttribute('data-bi'); render(); }; });
+      if (!bs.length) { $('body').innerHTML = '<div class="card">No batches for this strategy yet.</div>'; return; }
+      var cur = bs[bIdx]; ds = batchDraft(bDesk, cur); imgFn = function () { batchCard(cur, bDesk); };
+      if (cur.open) intro = '<div class="note">This batch is still open: the exit column is the live price and the numbers move. Post after it closes for final results.</div>';
+    } else if (mode === 'spot') {
       var w = winners();
       if (!w.up.length) { $('days').innerHTML = ''; $('body').innerHTML = '<div class="card">No strategy is above zero since the start, so there is no winner to feature yet. Use the daily recap, or wait for a better day.</div>'; return; }
       if (!spotDesk || !w.up.some(function (r) { return r.desk === spotDesk; })) spotDesk = w.up[0].desk;
@@ -185,6 +242,11 @@
       ta.oninput = upd; upd();
       document.querySelector('[data-copy="' + i + '"]').onclick = function () { copy(ta.value); };
     });
+  }
+  function loadPos() {
+    Promise.all([get('ap_positions', 'select=coin,side,entry_price,exit_price,status,pnl,notional,opened_at,max_hold_until&or=(coin.like.*:rev,coin.like.*:rev2,coin.like.*:r3d)&order=opened_at.asc&limit=3000'), get('ap_samples', 'select=coin,price&order=ts.desc&limit=400')]).then(function (r) {
+      POS = r[0]; LIVE = {}; r[1].forEach(function (x) { if (LIVE[x.coin] == null) LIVE[x.coin] = +x.price; }); render();
+    }).catch(function (e) { $('body').innerHTML = '<div class="card down">Could not load the batches: ' + esc(e.message) + '</div>'; });
   }
   function days() { var s = {}; ALL.forEach(function (r) { if (+r.trades_closed > 0) s[r.day] = 1; }); return Object.keys(s).sort().reverse().slice(0, 8); }
   get('ap_daily_snapshots', 'select=day,desk,desk_name,pnl,fees,trades_closed,win_rate,cum_pnl,cum_fees,cum_trades&order=day.desc&limit=1000').then(function (r) {

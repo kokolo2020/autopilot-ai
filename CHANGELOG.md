@@ -20,6 +20,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.30.2
+- Post Drafts: new Batch card mode: one image with every coin of a batch (entry, exit, P/L, short and long side totals) and a matching short draft; Neutral Rev, Rev 2 and Rev 3 daily
+
 ## v1.30.1
 - Post Drafts: new Strategy spotlight mode (default): features a strategy that is up since the start, with a rule line, a results image, and a draft that states how many strategies lost and that the sample is small; daily recap stays as a second tab
 
