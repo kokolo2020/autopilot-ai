@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="version" content="ap-v1.23.2">
+<meta name="version" content="ap-v1.24">
 <title>Autopilot</title>
 <style>
   :root { --bg:#0b0f14; --card:#121922; --card2:#0f151d; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --up:#3ddc97; --down:#ff6b6b; --acc:#6aa9ff; --warn:#f2c14e; --s1:#3987e5; --s2:#d95926; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
@@ -46,10 +46,10 @@
   details { margin-top:8px; } .h2s { color:var(--mut); font-size:12px; letter-spacing:.08em; text-transform:uppercase; font-weight:600; margin:22px 0 8px !important; } .dec > summary { list-style:none; margin:0; display:block; position:relative; padding-left:16px; color:var(--text); font-size:14px; } .dec > summary::-webkit-details-marker { display:none; } .dec > summary::before { content:'▸'; color:var(--mut); position:absolute; left:0; top:0; } .dec[open] > summary::before { content:'▾'; } .dec .when { float:right; color:var(--mut); font-size:12px; } .dec .sum { display:block; color:var(--mut); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; } .dec[open] .sum { display:none; } summary { cursor:pointer; color:var(--mut); font-size:12px; margin-bottom:8px; }
   @media (max-width:600px) { .wrap { padding:12px; } }
 </style>
-<style>.newrow td{background:rgba(245,166,35,.13)}.newrow td:first-child{box-shadow:inset 3px 0 #f5a623}.newb{background:#f5a623;color:#111;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle}</style></head>
+<style>.newrow td{background:rgba(245,166,35,.13)}.pos td{background:rgba(61,220,151,.14)!important}.pos td:first-child{box-shadow:inset 4px 0 var(--up)!important}.newrow td:first-child{box-shadow:inset 3px 0 #f5a623}.newb{background:#f5a623;color:#111;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle}</style></head>
 <body>
 <div class="wrap">
-  <h1>AUTOPILOT <small><span id="ver">ap-v1.23.2</span> · top 50 coins · paper money · decided by Claude · runs on the server</small></h1>
+  <h1>AUTOPILOT <small><span id="ver">ap-v1.24</span> · top 50 coins · paper money · decided by Claude · runs on the server</small></h1>
   <div class="sub" id="status">loading…</div>
   <div class="kpis" id="kpis"></div>
   <div class="card" id="cmp" style="margin-bottom:10px"></div>
@@ -131,6 +131,7 @@ var y1a = stats(PS().filter(function (p) { return /:rev2$/.test(p.coin); })), y1
 var y2a = stats(PS().filter(function (p) { return /:revm$/.test(p.coin); })), y2b = worth(function (c) { return /:revm$/.test(c); });
     rowsH += '<tr><td><b>Neutral Rev 2 limit</b> <span class="newb">NEW</span> <span class="mut">Neutral Rev 2 with limit entries 0.10% better, maker fee, 10 min wait</span></td><td class="num">' + y2a.trades + '</td><td class="num">' + (y2a.trades ? Math.round(y2a.w / y2a.trades * 100) + '%' : '–') + '</td><td class="num ' + cls(y2a.pnl) + '">' + money(y2a.pnl) + '</td><td class="num">$' + y2a.fees.toFixed(2) + '</td><td class="num">' + PS().filter(function (p) { return p.status === 'open' && /:revm$/.test(p.coin); }).length + '</td><td class="num ' + cls(y2b.unr) + '">' + money(y2b.unr) + '</td><td class="num"><b>$' + y2b.total.toFixed(2) + '</b> <span class="' + cls(y2b.pct) + '">' + (y2b.pct >= 0 ? '+' : '') + y2b.pct.toFixed(2) + '%</span></td></tr>';
     $('cmp').innerHTML = '<div class="scroll"><table><tr><th>Desk (all use the same Claude calls)</th><th class="num">Closed</th><th class="num">Win</th><th class="num">P&amp;L</th><th class="num">Fees</th><th class="num">Open</th><th class="num">Open P&amp;L</th><th class="num">Total value (start $' + (START * D.rows.length) + ')</th></tr>' + rowsH + '</table></div>';
+    Array.prototype.forEach.call($('cmp').querySelectorAll('table tr'), function (tr) { var c = tr.children[3]; if (c && c.classList && c.classList.contains('up')) tr.classList.add('pos'); }); /* green = desk is in profit */
 
     /* Neutral Reversal: one row per 24h batch, so daily P/L is on record */
     (function () {

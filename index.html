@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="version" content="ap-v1.23.2">
+<meta name="version" content="ap-v1.24">
 <title>Autopilot: which crypto strategies survive a falling market?</title>
 <meta name="description" content="A live paper-trading experiment. Six automated strategies trade pretend money on the top 50 coins. No real trades, nothing hidden.">
 <style>
   :root {
     --bg:#f5f6f8; --card:#ffffff; --line:#dfe3e8; --text:#161b22; --mut:#5a6675; --soft:#eef1f4;
     --up:#0f7a52; --down:#c0392b; --warn-bg:#fff6e0; --warn-line:#ecd18a; --warn-text:#6b4e00;
-    --shadow:0 1px 2px rgba(16,24,40,.05);
+    --shadow:0 1px 2px rgba(16,24,40,.05); --pos-bg:rgba(15,122,82,.07); --on-up:#fff;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#0e1116; --card:#161b22; --line:#2a3340; --text:#e8edf3; --mut:#9aa7b6; --soft:#1d2530;
-      --up:#3ddc97; --down:#ff7b6e; --warn-bg:#2a2410; --warn-line:#5a4a14; --warn-text:#f0d27a; --shadow:none; }
+      --up:#3ddc97; --down:#ff7b6e; --warn-bg:#2a2410; --warn-line:#5a4a14; --warn-text:#f0d27a; --shadow:none; --pos-bg:rgba(61,220,151,.09); --on-up:#07261a; }
   }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; -webkit-text-size-adjust:100%; }
@@ -35,6 +35,8 @@
   .head .hint { font-size:12px; color:var(--mut); }
   ol.board { list-style:none; margin:8px 0 0; padding:0; }
   .row { padding:14px 16px; border-top:1px solid var(--line); }
+  .row.pos { background:var(--pos-bg); box-shadow:inset 4px 0 var(--up); }
+  .badge { display:inline-flex; align-items:center; gap:4px; margin-left:8px; font-size:11.5px; font-weight:700; padding:2px 8px; border-radius:99px; background:var(--up); color:var(--on-up); vertical-align:2px; white-space:nowrap; }
   .row:first-child { border-top:0; }
   .top { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:4px 12px; align-items:center; }
   .rank { width:26px; height:26px; border-radius:50%; background:var(--soft); display:grid; place-items:center; font-size:13px; font-weight:700; color:var(--mut); }
@@ -54,6 +56,7 @@
   .chartcard { padding:14px 12px 10px; }
   .legend { display:flex; flex-wrap:wrap; gap:6px; margin:10px 4px 6px; }
   .legend button { font:inherit; font-size:12.5px; display:inline-flex; gap:6px; align-items:center; padding:5px 10px; border-radius:99px; border:1px solid var(--line); background:var(--card); color:var(--text); cursor:pointer; }
+  .legend button.pos { border-color:var(--up); }
   .legend button[aria-pressed="false"] { opacity:.45; text-decoration:line-through; }
   .legend .dot { width:9px; height:9px; }
   .chartbox { position:relative; }
@@ -106,7 +109,7 @@
     </ul>
   </section>
 
-  <div class="foot"><span id="updated">&nbsp;</span><span>Autopilot <span id="ver">ap-v1.23.2</span> · <a href="/research.html">Research dashboard</a></span></div>
+  <div class="foot"><span id="updated">&nbsp;</span><span>Autopilot <span id="ver">ap-v1.24</span> · <a href="/research.html">Research dashboard</a></span></div>
 </div>
 
 <script>
@@ -168,7 +171,8 @@
         return { d: d, pts: pts, total: total, trades: trades, win: trades ? Math.round(wins / trades * 100) : null, open: open.length, status: status };
       });
       S.sort(function (a, b) { return b.total - a.total; });
-      $('winlabel').textContent = (now - RACE < 7 * DAY ? 'since the start, ' + Math.max(1, Math.round((now - RACE) / DAY)) + ' day' + (Math.round((now - RACE) / DAY) === 1 ? '' : 's') : 'last 7 days');
+      var nPos = S.filter(function (s) { return s.total > 0.5; }).length;
+      $('winlabel').textContent = (now - RACE < 7 * DAY ? 'since the start, ' + Math.max(1, Math.round((now - RACE) / DAY)) + ' day' + (Math.round((now - RACE) / DAY) === 1 ? '' : 's') : 'last 7 days') + ' \u00b7 ' + nPos + ' of ' + S.length + ' in profit';
       $('updated').textContent = 'Updated ' + new Date(now).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) + ' · refreshes every 5 minutes';
       render();
     }).catch(function () { $('board').innerHTML = '<li class="msg">Live results are temporarily unavailable. Please try again in a minute.</li>'; $('mood').textContent = 'Market data unavailable'; });
@@ -182,14 +186,15 @@
 
   function render() {
     $('board').innerHTML = S.map(function (s, i) {
-      return '<li class="row"><div class="top"><span class="rank">' + (i + 1) + '</span><span class="name"><span class="dot" style="background:' + s.d.color + '"></span>' + s.d.name + '</span>' +
+      var pos = s.total > 0.5;
+      return '<li class="row' + (pos ? ' pos' : '') + '"><div class="top"><span class="rank">' + (i + 1) + '</span><span class="name"><span class="dot" style="background:' + s.d.color + '"></span>' + s.d.name + (pos ? '<span class="badge">\u2713 In profit</span>' : '') + '</span>' +
         '<span class="big num ' + cls(s.total) + '">' + arrow(s.total) + usd(s.total) + '<small>' + sign(s.total) + Math.abs(s.total / BANK * 100).toFixed(2) + '% of bank</small></span>' +
         '<p class="idea">' + s.d.idea + '</p>' + spark(s) +
         '<div class="meta"><span class="chip">' + s.status + '</span><span class="num">' + s.trades + ' closed trades' + (s.win == null ? '' : ' · ' + s.win + '% won') + ' · ' + s.open + ' open</span></div>' +
         '<details><summary>How it works (technical)</summary><p>' + s.d.how + '</p></details></div></li>';
     }).join('');
     $('legend').innerHTML = S.map(function (s) {
-      return '<button type="button" data-id="' + s.d.id + '" aria-pressed="' + (!hidden[s.d.id]) + '"><span class="dot" style="background:' + s.d.color + '"></span>' + s.d.name + ' <b class="num ' + cls(s.total) + '">' + usd(s.total) + '</b></button>';
+      return '<button type="button" class="' + (s.total > 0.5 ? 'pos' : '') + '" data-id="' + s.d.id + '" aria-pressed="' + (!hidden[s.d.id]) + '"><span class="dot" style="background:' + s.d.color + '"></span>' + s.d.name + ' <b class="num ' + cls(s.total) + '">' + usd(s.total) + '</b></button>';
     }).join('');
     Array.prototype.forEach.call($('legend').querySelectorAll('button'), function (b) { b.onclick = function () { hidden[b.dataset.id] = !hidden[b.dataset.id]; render(); }; });
     chart();

@@ -4,6 +4,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.24
+- Highlight profitable strategies in green (public page and research table)
+
 ## v1.23.2
 - Removed the two empty top-100 rows from the research dashboard (the top-100 track is off).
 
