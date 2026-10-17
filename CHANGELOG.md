@@ -9,6 +9,11 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.26.2
+- NEW desk rows back to orange
+- Research table: NEW rows are orange (tint across the whole row, orange left bar and badge) instead of blue. Green still wins for profitable desks.
+
 ## v1.26.1
 - NEW desk rows highlighted blue across the whole row
 - Research table: rows tagged NEW (Wild, Extra-wild, Neutral Rev 2, Rev 2 limit and the v1.25/v1.26 desks) now have a blue tint across the whole row, blue left bar and blue badge instead of amber. A green profit row still wins over blue.
