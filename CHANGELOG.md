@@ -17,6 +17,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.29.4
+- Research dashboard: roll back the premium look to the compact original
+
 ## v1.29.3
 - Research dashboard: premium look (type, spacing, ledger-style tables, connected KPI strip, desk names stay in view when the table scrolls sideways). Looks only, no content or logic changes
 
