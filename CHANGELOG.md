@@ -10,6 +10,11 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.27
+- Neutral Rev 2 stop tightened from 15% to 10%
+- Applies to Neutral Rev 2 and Neutral Rev 2 limit, for new entries and resets; legs already open keep the stop they were opened with. Back-test over 43 hourly 24h Rev batches: 10% averaged +$299 per batch with a worst batch of -$170, versus +$279 and -$287 at 15%; stops of 6% or tighter earned less (+$196 at 6%, +$138 at 3%). About 2.75 days of data, so a forward test.
+
 ## v1.26.2
 - NEW desk rows back to orange
 - Research table: NEW rows are orange (tint across the whole row, orange left bar and badge) instead of blue. Green still wins for profitable desks.

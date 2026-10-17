@@ -406,10 +406,10 @@ export const ALGOW = { tp: 1.2, sl: 0.6, holdMin: 60, cooldownMin: 10 }, ALGOX =
 export const ALGO_SKIP = ['PEPE', 'SHIB', 'BONK', 'WIF', 'FLOKI', 'TRUMP', 'SEI', 'JUP', 'PENDLE', 'GRT'];
 export const ALGOT_COINS = ['AAVE', 'TIA', 'ICP', 'ZEC', 'ENA', 'APT', 'ARB', 'OP', 'ONDO', 'DOT'];
 /* Neutral Reversal 2 (:rev2, market orders) and its limit-order twin (:revm). Same ranking as :rev (long the 8 weakest, short the 8 strongest by 24h change, one batch per 24h, 24h hold, no take profit).
-   Differences: leg 1 opens at 4x with a 15% stop. When the stop hits, the loss is booked and the SAME side reopens at the market price one leverage step higher (5x, 6x, 7x) with the same batch deadline.
+   Differences: leg 1 opens at 4x with a 10% stop (15% before v1.27). When the stop hits, the loss is booked and the SAME side reopens at the market price one leverage step higher (5x, 6x, 7x) with the same batch deadline.
    After the stop at 7x the leg is done (3 resets max). Every entry is a fresh $250 margin, so one leg can commit up to $1,000 margin and book up to roughly $825 of losses.
-   The stop is kept just inside liquidation (1/lev minus 1%), so at 7x it is 13.3% instead of 15% (a real 7x position is liquidated near 14.3%). :revm places leg 1 as a limit order 0.10% better, waits 10 minutes, pays maker fee on that entry; resets are market orders. Forward test. */
-export const REV2 = { K: 8, holdH: 24, lev0: 4, levMax: 7, stopPct: 0.15 };
+   The stop is kept just inside liquidation (1/lev minus 1%), so at 7x it would be 13.3%, which the 10% stop never reaches (a real 7x position is liquidated near 14.3%). :revm places leg 1 as a limit order 0.10% better, waits 10 minutes, pays maker fee on that entry; resets are market orders. Forward test. */
+export const REV2 = { K: 8, holdH: 24, lev0: 4, levMax: 7, stopPct: 0.10 }; // stop was 15% until v1.27; a back-test on 43 batches found 10% earned more with a smaller worst batch
 const rev2Lev = (p) => Math.round(+p.notional / START), rev2Stop = (lev) => Math.min(REV2.stopPct, 1 / lev - 0.01);
 async function rev2Tick(db, rows, openPos, ctl, desk) {
   const sfx = ':' + desk, limit = desk === 'revm', out = [], lev0N = START * REV2.lev0;
