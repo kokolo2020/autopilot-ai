@@ -12,6 +12,13 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.28.1
+- Funding Carry: entries now use real executable prices (spot bought at the ask, perp shorted at the bid) and marks use the exit side (spot at the bid, perp at the ask). Before, it used last-trade prices, which for thin coins can be minutes apart between spot and perp and showed up as fake price drift of up to -$0.56 per coin.
+- Many coins sit at the same 0.01% base funding rate, so ties (to 0.001%) are now broken by the tightest combined spot + perp spread, and coins with combined spread above 0.2% are skipped.
+- To restart the desk on the new pricing, run `delete from ap_carry;` once in the Supabase SQL Editor (the first rows were opened with last-trade prices).
+- Funding Carry uses bid/ask prices and prefers tight-spread coins
+
 ## v1.28
 - Funding Carry (paper): $5,000 of simulated spot plus $5,000 short USDT perpetual at 1x, split over 20 coins ($250 per leg each). Price moves cancel; the profit is the funding the short receives at each settlement.
 - Picks the 20 coins with the highest positive funding among the top-coin list that have both a live OKX perpetual and a spot market (at least 0.005% per settlement). Closes a coin after 3 settlements in a row with negative funding, refills the slot with the next best coin, and does not re-enter a closed coin for 24h.
