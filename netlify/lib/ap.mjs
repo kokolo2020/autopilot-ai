@@ -83,6 +83,10 @@ export function sb(key) {
       const r = await fetch(SB_URL + '/rest/v1/' + table + '?on_conflict=' + conflict, { method: 'POST', headers: sbHeaders(key, { Prefer: 'resolution=merge-duplicates,return=minimal' }), body: JSON.stringify(rows) });
       if (!r.ok) throw new Error('upsert ' + table + ' ' + r.status + ' ' + (await r.text()).slice(0, 120));
     },
+    async del(table, query) {
+      const r = await fetch(SB_URL + '/rest/v1/' + table + '?' + query, { method: 'DELETE', headers: sbHeaders(key, { Prefer: 'return=minimal' }) });
+      if (!r.ok) throw new Error('delete ' + table + ' ' + r.status + ' ' + (await r.text()).slice(0, 120));
+    },
     async update(table, query, patch) {
       const r = await fetch(SB_URL + '/rest/v1/' + table + '?' + query, { method: 'PATCH', headers: sbHeaders(key, { Prefer: 'return=minimal' }), body: JSON.stringify(patch) });
       if (!r.ok) throw new Error('update ' + table + ' ' + r.status + ' ' + (await r.text()).slice(0, 120));
@@ -568,11 +572,12 @@ async function revTick(db, rows, openRev, ctl) {
   const rk = rows.filter((r) => !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
   if (rk.length < REV.K * 2 + 4) return out;
   const legs = rk.slice(0, REV.K).map((r) => [r, 1]).concat(rk.slice(-REV.K).map((r) => [r, -1]));
-  for (const [r, dir] of legs) {
-    const m = r.m, notional = START * LEV, d = decFor(m.price) + 2;
-    await db.insert('ap_positions', { coin: r.coin + ':rev', side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * 0.5)).toFixed(d), sl: +(m.price * (1 - dir * 0.5)).toFixed(d), max_hold_until: new Date(Date.now() + REV.holdH * 3600000).toISOString() });
-    out.push('rev opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + r.coin);
-  }
+  /* One request inserts the whole batch, so two overlapping runs cannot interleave their legs. If two runs both opened a batch, the first one's 16 legs (lowest ids) stay and the rest are deleted. */
+  const t0 = new Date(Date.now() - 120000).toISOString();
+  await db.insertMany('ap_positions', legs.map(([r, dir]) => { const m = r.m, notional = START * LEV, d = decFor(m.price) + 2; return { coin: r.coin + ':rev', side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * 0.5)).toFixed(d), sl: +(m.price * (1 - dir * 0.5)).toFixed(d), max_hold_until: new Date(Date.now() + REV.holdH * 3600000).toISOString() }; }));
+  for (const [r, dir] of legs) out.push('rev opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + r.coin);
+  const fresh = await db.select('ap_positions', 'select=id&coin=like.*:rev&status=eq.open&opened_at=gte.' + encodeURIComponent(t0) + '&order=id.asc').catch(() => []);
+  if (fresh.length > REV.K * 2) { await db.del('ap_positions', 'coin=like.*:rev&status=eq.open&id=gt.' + fresh[REV.K * 2 - 1].id).catch(() => null); out.push('rev duplicate batch removed (' + (fresh.length - REV.K * 2) + ' legs)'); }
   return out;
 }
 

@@ -23,6 +23,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.30.5
+- Neutral Rev: open each batch in one request and remove a duplicate batch
+
 ## v1.30.4
 - Batch card: fix long prices overlapping
 
