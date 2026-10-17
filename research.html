@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="version" content="ap-v1.27">
+<meta name="version" content="ap-v1.28">
 <title>Autopilot</title>
 <style>
   :root { --bg:#0b0f14; --card:#121922; --card2:#0f151d; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --up:#3ddc97; --down:#ff6b6b; --acc:#6aa9ff; --warn:#f2c14e; --s1:#3987e5; --s2:#d95926; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
@@ -49,10 +49,11 @@
 <style>.newrow td{background:rgba(245,166,35,.18)}.pos td{background:rgba(61,220,151,.14)!important}.pos td:first-child{box-shadow:inset 4px 0 var(--up)!important}.newrow td:first-child{box-shadow:inset 4px 0 #f5a623}.newb{background:#f5a623;color:#111;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle}</style></head>
 <body>
 <div class="wrap">
-  <h1>AUTOPILOT <small><span id="ver">ap-v1.27</span> · top 50 coins · paper money · decided by Claude · runs on the server</small></h1>
+  <h1>AUTOPILOT <small><span id="ver">ap-v1.28</span> · top 50 coins · paper money · decided by Claude · runs on the server</small></h1>
   <div class="sub" id="status">loading…</div>
   <div class="kpis" id="kpis"></div>
   <div class="card" id="cmp" style="margin-bottom:10px"></div>
+  <div class="card" id="carry" style="margin-bottom:10px"></div>
   <div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="mut">AI desk mode:</span><span class="chip" data-aim=":n">Normal</span><span class="chip on" data-aim="">Aggressive</span><span class="chip" data-aim=":s">Super</span><span class="chip" data-aim=":u">Ultra</span><span class="chip" data-aim=":m">Maker (limit orders)</span></div>
   <h2>Top 50 race: what $250 in each coin is worth now <span class="mut" style="text-transform:none;letter-spacing:0">· every line starts at $250 · hover a line, click to open a coin</span></h2>
   <div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="chip on" data-mode="hold">Holding 1x</span><span class="chip" data-mode="h15">1.5x</span><span class="chip" data-mode="h2">2x</span><span class="chip" data-mode="h3">3x</span><span class="chip" data-mode="al">Algo desk (5x)</span><span class="chip" data-mode="ai">AI desk (5x)</span><span style="flex:1"></span><span class="chip" id="replay">▶ Replay</span><span class="chip" id="recap">🎬 6h recap (3 min)</span><span id="recapMsg" class="mut"></span><span class="chip" data-win="3">3h</span><span class="chip on" data-win="0">Since 18:00</span><span class="chip" data-win="6">6h</span><span class="chip" data-win="24">24h</span><span class="chip" data-win="72">3d</span></div>
@@ -79,6 +80,21 @@
   var cls = function (n) { return n > 0 ? 'up' : n < 0 ? 'down' : 'mut'; };
   var px = function (p) { p = +p; return p >= 1000 ? p.toFixed(1) : p >= 10 ? p.toFixed(3) : p >= 1 ? p.toFixed(4) : p.toFixed(6); };
   var ago = function (iso) { var m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 60 ? m + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago'; };
+  /* Funding Carry (paper): $250 spot + $250 short perp per coin, 20 coins, rows in ap_carry */
+  function loadCarry() {
+    get('ap_carry', 'select=*&order=opened_at.asc&limit=500').then(function (rs) {
+      var open = rs.filter(function (r) { return r.status === 'open'; }), sum = function (k) { return rs.reduce(function (s, r) { return s + (+r[k] || 0); }, 0); };
+      var fund = sum('funding_total'), price = sum('price_pnl'), fees = sum('fees'), net = sum('net_pnl'), dep = Math.max(open.length, 1) * 500, firstMs = rs.length ? new Date(rs[0].opened_at).getTime() : Date.now(), days = Math.max((Date.now() - firstMs) / 864e5, 0.01);
+      var ann = rs.length ? (net / (Math.max(rs.length, 1) * 500)) / days * 365 * 100 : 0;
+      var rowsC = rs.slice().sort(function (a, b) { return (+b.net_pnl) - (+a.net_pnl); }).map(function (r) {
+        return '<tr' + (+r.net_pnl > 0 ? ' class="pos"' : '') + '><td><b>' + r.coin + '</b>' + (r.status === 'open' ? '' : ' <span class="mut">closed</span>') + '</td><td class="num">' + (+r.entry_rate * 100).toFixed(4) + '%</td><td class="num ' + cls(+r.funding_total) + '">' + money(+r.funding_total) + '</td><td class="num ' + cls(+r.price_pnl) + '">' + money(+r.price_pnl) + '</td><td class="num">$' + (+r.fees).toFixed(2) + '</td><td class="num ' + cls(+r.net_pnl) + '"><b>' + money(+r.net_pnl) + '</b></td><td class="mut">' + ago(r.opened_at) + '</td></tr>';
+      }).join('');
+      $('carry').innerHTML = '<h2 style="margin-top:0">Funding Carry <span class="newb">NEW</span> <span class="mut" style="font-weight:400">paper: $250 spot + $250 short perp (1x) per coin, up to 20 coins = $5,000 + $5,000. Price moves cancel out; the profit is the funding the short receives.</span></h2>' +
+        '<p class="mut">' + open.length + ' of 20 slots open · funding collected <b class="' + cls(fund) + '">' + money(fund) + '</b> · price drift ' + money(price) + ' · fees $' + fees.toFixed(2) + ' · <b class="' + cls(net) + '">net ' + money(net) + '</b> · yearly pace ' + (days >= 1 ? ann.toFixed(1) + '% on the money in use' : 'shown after the first day') + ' (entry fees dominate the first days)</p>' +
+        (rs.length ? '<div class="scroll"><table><tr><th>Coin</th><th class="num">Funding at entry</th><th class="num">Funding earned</th><th class="num">Price drift</th><th class="num">Fees</th><th class="num">Net</th><th>Opened</th></tr>' + rowsC + '</table></div>' : '<p class="mut">No positions yet. The desk fills its slots with the highest positive-funding coins on the next 5-minute run.</p>');
+    }).catch(function () { $('carry').innerHTML = '<h2 style="margin-top:0">Funding Carry <span class="newb">NEW</span></h2><p class="mut">Table ap_carry not found yet. Run the last SQL block in sql/autopilot.sql (the Funding Carry one) in the Supabase SQL Editor.</p>'; });
+  }
+  setTimeout(loadCarry, 0); setInterval(loadCarry, 120000);
   function stats(list) { var closed = list.filter(function (p) { return p.status === 'closed'; }), w = closed.filter(function (p) { return +p.pnl >= 0; }).length; return { trades: closed.length, w: w, l: closed.length - w, pnl: closed.reduce(function (s, p) { return s + +p.pnl; }, 0), fees: closed.reduce(function (s, p) { return s + +p.fees; }, 0), open: list.filter(function (p) { return p.status === 'open'; })[0] || null }; }
   function build(r) {
     var pos = r[0], decs = r[1], news = r[2], smp = r[3], coins = {}, latest = {};

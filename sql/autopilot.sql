@@ -97,3 +97,23 @@ select
 from ap_daily_snapshots
 group by desk;
 grant select on ap_desk_scorecard to anon;
+
+-- Funding Carry paper desk (v1.28): $250 spot + $250 short perpetual per coin, 20 coins. One row per coin position, written by the Netlify autopilot function.
+create table if not exists ap_carry (
+  id bigint generated always as identity primary key,
+  coin text not null, status text not null default 'open',
+  opened_at timestamptz not null default now(), closed_at timestamptz, close_reason text,
+  leg_usd numeric not null,                       -- dollars per leg (spot and perp each)
+  spot_entry numeric not null, perp_entry numeric not null, spot_qty numeric not null, perp_qty numeric not null,
+  entry_rate numeric,                             -- funding rate per settlement when opened (0.0001 = 0.01%)
+  funding_total numeric not null default 0,       -- funding received so far
+  last_funding_ts bigint not null,                -- ms timestamp of the last settlement counted
+  spot_last numeric, perp_last numeric,
+  price_pnl numeric not null default 0,           -- spot gain + perp short gain (should stay near 0)
+  fees numeric not null default 0,
+  net_pnl numeric not null default 0,             -- funding_total + price_pnl - fees
+  updated_at timestamptz
+);
+alter table ap_carry enable row level security;
+drop policy if exists "anon read carry" on ap_carry;
+create policy "anon read carry" on ap_carry for select to anon using (true);

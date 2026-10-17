@@ -11,6 +11,13 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.28
+- Funding Carry (paper): $5,000 of simulated spot plus $5,000 short USDT perpetual at 1x, split over 20 coins ($250 per leg each). Price moves cancel; the profit is the funding the short receives at each settlement.
+- Picks the 20 coins with the highest positive funding among the top-coin list that have both a live OKX perpetual and a spot market (at least 0.005% per settlement). Closes a coin after 3 settlements in a row with negative funding, refills the slot with the next best coin, and does not re-enter a closed coin for 24h.
+- Costs modelled: spot taker 0.10% + perp taker 0.055%, on each leg at entry and exit. Spot is simulated from OKX spot prices; nothing is bought.
+- New table `ap_carry` (SQL block at the end of sql/autopilot.sql, run it once in Supabase). New "Funding Carry" card on the research page, kill switch `carry` on the control page (stops new coins only).
+
 ## v1.27
 - Neutral Rev 2 stop tightened from 15% to 10%
 - Applies to Neutral Rev 2 and Neutral Rev 2 limit, for new entries and resets; legs already open keep the stop they were opened with. Back-test over 43 hourly 24h Rev batches: 10% averaged +$299 per batch with a worst batch of -$170, versus +$279 and -$287 at 15%; stops of 6% or tighter earned less (+$196 at 6%, +$138 at 3%). About 2.75 days of data, so a forward test.

@@ -25,6 +25,7 @@ export const PICKS = 16;
 const modeOf = (key) => (/:m$/.test(key) ? 'm' : /:g$/.test(key) ? 'g' : /:n$/.test(key) ? 'n' : /:s$/.test(key) ? 's' : /:u$/.test(key) ? 'u' : key.includes(':') ? null : 'a');
 export const decFor = (p) => (p >= 1000 ? 2 : p >= 10 ? 3 : p >= 1 ? 4 : 6);
 let instAt = 0, INST = {};
+export const _setInst = (x) => { INST = x; }; // test hook
 /* Watchlist: the page appends a desk_events row (kind 'watchlist', data.list). The newest one wins. Always 50 live coins:
    invalid or unlisted entries are replaced by the next spare from TOP. Coins with open trades stay until the trade closes. */
 async function loadInstruments(db) {
@@ -563,6 +564,62 @@ async function revVariantTick(db, rows, openPos, ctl, desk) {
   return out;
 }
 
+/* ---------- Funding Carry (paper): $5,000 of spot + $5,000 short perpetual at 1x, split over 20 coins ($250 per leg per coin) ----------
+   Each slot holds one coin: buy $250 spot and short $250 of the USDT perpetual (1x, so no liquidation risk to speak of). Price moves cancel; the profit is the funding the short receives
+   every settlement (00:00, 08:00, 16:00 UTC; some coins settle every 4h) while the rate is positive. Slots are filled with the 20 coins that have the highest positive funding among the top-coin list
+   (needs a live OKX perpetual and a spot market). A slot is closed after 3 settlements in a row with negative funding, then refilled with the best remaining coin.
+   Costs: spot taker 0.10% + perp taker 0.055% on each leg and each of entry and exit. Spot is simulated from OKX spot prices, nothing is bought. Rows live in table ap_carry. Forward test. */
+export const CARRY = { slots: 20, leg: 250, spotFee: 0.001, perpFee: FEE, minRate: 0.00005, exitNegative: 3, scanEveryMin: 30 };
+export const carryFees = () => CARRY.leg * (CARRY.spotFee + CARRY.perpFee);
+/* funding the short received for settlements newer than `sinceMs`; history = OKX rows { fundingRate, fundingTime } */
+export function carryFunding(history, sinceMs, notional) {
+  const fresh = history.filter((h) => +h.fundingTime > sinceMs).sort((a, b) => +a.fundingTime - +b.fundingTime);
+  return { earned: fresh.reduce((s, h) => s + notional * +h.fundingRate, 0), lastTs: fresh.length ? +fresh[fresh.length - 1].fundingTime : sinceMs, n: fresh.length };
+}
+export const carryShouldExit = (history) => { const h = history.slice().sort((a, b) => +b.fundingTime - +a.fundingTime).slice(0, CARRY.exitNegative); return h.length >= CARRY.exitNegative && h.every((x) => +x.fundingRate < 0); };
+export const carryPriceNet = (row, spot, perp) => (+row.spot_qty) * (spot - +row.spot_entry) + (+row.perp_qty) * (+row.perp_entry - perp);
+let carryScanAt = 0;
+export async function carryTick(db, ctl, now = Date.now()) {
+  const out = [];
+  const open = await db.select('ap_carry', 'select=*&status=eq.open');
+  const spotT = {}, swapT = {};
+  for (const t of await okx('/api/v5/market/tickers?instType=SPOT')) spotT[t.instId] = +t.last;
+  for (const t of await okx('/api/v5/market/tickers?instType=SWAP')) swapT[t.instId] = +t.last;
+  const settleWindow = new Date(now).getUTCMinutes() < 30;
+  for (const row of open) {
+    const sp = spotT[row.coin + '-USDT'], pp = swapT[row.coin + '-USDT-SWAP'];
+    let hist = [], funding = +row.funding_total, lastTs = +row.last_funding_ts;
+    if (settleWindow) {
+      hist = await okx('/api/v5/public/funding-rate-history?instId=' + row.coin + '-USDT-SWAP&limit=10').catch(() => []);
+      const f = carryFunding(hist, lastTs, +row.leg_usd); funding += f.earned; lastTs = f.lastTs; if (f.n) out.push(row.coin + ' funding ' + f.earned.toFixed(4) + ' (' + f.n + ' settlements)');
+    }
+    if (!(sp > 0) || !(pp > 0)) { if (settleWindow) await db.update('ap_carry', 'id=eq.' + row.id, { funding_total: funding, last_funding_ts: lastTs }); continue; }
+    const priceNet = carryPriceNet(row, sp, pp), exit = settleWindow && carryShouldExit(hist), fees = +row.fees + (exit ? carryFees() : 0);
+    await db.update('ap_carry', 'id=eq.' + row.id, Object.assign({ funding_total: funding, last_funding_ts: lastTs, spot_last: sp, perp_last: pp, price_pnl: priceNet, fees, net_pnl: funding + priceNet - fees, updated_at: new Date(now).toISOString() }, exit ? { status: 'closed', closed_at: new Date(now).toISOString(), close_reason: 'funding negative ' + CARRY.exitNegative + 'x' } : {}));
+    if (exit) out.push(row.coin + ' closed (funding negative)');
+  }
+  const recent = await db.select('ap_carry', 'select=coin&status=eq.closed&closed_at=gte.' + new Date(now - 86400000).toISOString()).catch(() => []);
+  const held = new Set(open.map((r) => r.coin).concat(recent.map((r) => r.coin))); // a coin that just turned negative waits 24h
+  const free = CARRY.slots - open.length;
+  if (free <= 0 || ctlBlocks(ctl, 'carry', '') || now - carryScanAt < CARRY.scanEveryMin * 60000) return out;
+  carryScanAt = now;
+  const cands = TOP.filter((c) => !held.has(c) && INST[c + '-USDT-SWAP'] && INST[c + '-USDT-SWAP'].state === 'live' && spotT[c + '-USDT'] > 0 && swapT[c + '-USDT-SWAP'] > 0 && !(ctl && ctl.coinsOff && ctl.coinsOff[c]));
+  const rates = [];
+  for (let i = 0; i < cands.length; i += 8) {
+    const part = await Promise.all(cands.slice(i, i + 8).map((c) => okx('/api/v5/public/funding-rate?instId=' + c + '-USDT-SWAP').then((d) => ({ c, r: +d[0].fundingRate })).catch(() => null)));
+    for (const x of part) if (x && isFinite(x.r)) rates.push(x);
+    if (i + 8 < cands.length) await new Promise((r) => setTimeout(r, 1000));
+  }
+  const best = rates.filter((x) => x.r >= CARRY.minRate).sort((a, b) => b.r - a.r).slice(0, free);
+  for (const { c, r } of best) {
+    const sp = spotT[c + '-USDT'], pp = swapT[c + '-USDT-SWAP'];
+    await db.insert('ap_carry', { coin: c, status: 'open', opened_at: new Date(now).toISOString(), leg_usd: CARRY.leg, spot_entry: sp, perp_entry: pp, spot_qty: CARRY.leg / sp, perp_qty: CARRY.leg / pp, entry_rate: r, funding_total: 0, last_funding_ts: now, spot_last: sp, perp_last: pp, price_pnl: 0, fees: carryFees(), net_pnl: -carryFees(), updated_at: new Date(now).toISOString() });
+    out.push('carry opened ' + c + ' funding ' + (r * 100).toFixed(4) + '%');
+  }
+  if (!best.length) out.push('carry: no coin with funding >= ' + (CARRY.minRate * 100).toFixed(3) + '% (' + rates.length + ' checked)');
+  return out;
+}
+
 const shared0Breadth = (rows) => rows.filter((r) => r.F.ret_60m < 0).length / Math.max(1, rows.length);
 export async function tickAll(env) {
   if (!env.SUPABASE_SERVICE_KEY || !env.ANTHROPIC_API_KEY) return [{ skipped: 'missing keys' }];
@@ -594,6 +651,7 @@ export async function tickAll(env) {
   const flipRes = await revVariantTick(db, rows, openFlip, ctl, 'flip').catch((e) => ['flip error ' + String(e.message || e).slice(0, 60)]);
   const revvRes = await revVariantTick(db, rows, openRevv, ctl, 'revv').catch((e) => ['revv error ' + String(e.message || e).slice(0, 60)]);
   const capRes = await revVariantTick(db, rows, openCap, ctl, 'caprev').catch((e) => ['caprev error ' + String(e.message || e).slice(0, 60)]);
+  const carryRes = await carryTick(db, ctl).catch((e) => ['carry error ' + String(e.message || e).slice(0, 80)]);
   const algoRes = await Promise.all(VN.flatMap((v, vi) => rows.map((r) => algoTick(db, r, openAlgo, closedAlgo, v, breadth, ctl).then((s) => r.coin + TAG[vi] + s).catch((e) => r.coin + ' error ' + String(e.message || e).slice(0, 60)))));
   const mirRes = await Promise.all(openMir.map((pp) => { const r = rows.find((x) => x.coin === pp.coin.split(':')[0]); return r ? manageOpen(db, pp, r.m).then((x) => { if (x.closed) cnt[modeOf(pp.coin)]--; return x.closed ? pp.coin + ' closed ' + x.pnl.toFixed(2) : null; }).catch(() => null) : null; }));
   const rets = rows.map((r) => r.F.ret_60m).sort((x, y) => x - y), btc = rows.find((r) => r.coin === 'BTC');
@@ -611,7 +669,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = Array.from(openSet).concat(picks).filter((s) => COINS[s]);
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */
