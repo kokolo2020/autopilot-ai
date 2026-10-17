@@ -8,6 +8,11 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.26.1
+- NEW desk rows highlighted blue across the whole row
+- Research table: rows tagged NEW (Wild, Extra-wild, Neutral Rev 2, Rev 2 limit and the v1.25/v1.26 desks) now have a blue tint across the whole row, blue left bar and blue badge instead of amber. A green profit row still wins over blue.
+
 ## v1.26
 - Capitulation Rev desk (Rev only after a market drop)
 - Capitulation Rev (`XXX:caprev`): the Neutral Rev batch, but only started when the average 24h change of the scanned coins is -1% or lower; otherwise it waits in cash. Based on a back-test of 2.75 days of ap_samples: Rev made about +$454 per batch after a market drop and -$67 otherwise (one rebound episode, so a hypothesis). Same kill switch, snapshot and research-table wiring as the other new desks.
