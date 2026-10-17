@@ -151,7 +151,8 @@
   }
 
   /* ---------- batch card: every coin of one batch with entry, exit and P/L ---------- */
-  var BDESKS = [['rev', 'Neutral Rev'], ['rev2', 'Rev 2'], ['r3d', 'Rev 3 daily']], FEE = 0.00055;
+  var BDESKS = [['rev', 'Neutral Rev', '5x leverage'], ['rev2', 'Rev 2', '4x leverage'], ['r3d', 'Rev 3 daily', '4x leverage']], FEE = 0.00055;
+  var bInfo = function (desk) { return BDESKS.filter(function (d) { return d[0] === desk; })[0] || [desk, desk, '']; };
   var pxf = function (p) { return String(Number((+p).toPrecision(5))); };
   function batchesOf(desk) {
     var mine = (POS || []).filter(function (p) { return p.coin.slice(-(desk.length + 1)) === ':' + desk; }).sort(function (a, b) { return new Date(a.max_hold_until) - new Date(b.max_hold_until); }), groups = [], lastT = null;
@@ -170,33 +171,41 @@
     var nm = (BDESKS.filter(function (d) { return d[0] === desk; })[0] || [0, desk])[1], sh = b.legs.filter(function (l) { return l.side === 'SHORT'; }), lg = b.legs.filter(function (l) { return l.side === 'LONG'; });
     var sum = function (a) { return a.reduce(function (s, l) { return s + l.pnl; }, 0); }, sorted = b.legs.slice().sort(function (x, y) { return y.pnl - x.pnl; });
     var head = nm + ', batch ' + b.no + (b.open ? ' (still open): ' : ': ') + m0(b.total) + ' after fees.';
-    var r = build([head, 'Short the strongest: ' + m0(sum(sh)) + '. Long the weakest: ' + m0(sum(lg)) + '.'], ['Best: ' + sorted[0].coin + ' ' + m0(sorted[0].pnl) + '. Worst: ' + sorted[sorted.length - 1].coin + ' ' + m0(sorted[sorted.length - 1].pnl) + '.', 'Every coin, entry and exit in the image.', 'Paper money, not advice.'], true);
+    var r = build([head, 'OKX perpetual futures, ' + bInfo(desk)[2].split(',')[0] + ', paper money.', 'Short the strongest: ' + m0(sum(sh)) + '. Long the weakest: ' + m0(sum(lg)) + '.'], ['Best: ' + sorted[0].coin + ' ' + m0(sorted[0].pnl) + '. Worst: ' + sorted[sorted.length - 1].coin + ' ' + m0(sorted[sorted.length - 1].pnl) + '.', 'Every coin, entry and exit in the image.', 'Paper money, not advice.'], true);
     return [{ title: 'Batch result', note: 'Totals for the short and long side, best and worst coin.', d: r }];
   }
   function batchCard(b, desk) {
-    var cv = $('cv'); if (!cv) return; var W = 1200, H = 675, c = cv.getContext('2d'), sans = 'system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
-    var nm = (BDESKS.filter(function (d) { return d[0] === desk; })[0] || [0, desk])[1];
-    c.fillStyle = '#0b0f14'; c.fillRect(0, 0, W, H);
-    c.fillStyle = '#e6edf3'; c.font = '700 40px ' + sans; c.textAlign = 'left'; c.fillText(nm + ' · batch ' + b.no, 56, 70);
+    var cv = $('cv'); if (!cv) return; var W = 1200, H = 675, c = cv.getContext('2d'), sans = 'system-ui,-apple-system,Segoe UI,Roboto,sans-serif', info = bInfo(desk), nm = info[1];
+    var UP = '#3ddc97', DN = '#ff6b6b', up0 = b.total >= 0;
+    var bg = c.createLinearGradient(0, 0, W, H); bg.addColorStop(0, '#0a0e14'); bg.addColorStop(1, '#0f1722'); c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    var glow = c.createRadialGradient(W - 140, 70, 10, W - 140, 70, 420); glow.addColorStop(0, up0 ? 'rgba(61,220,151,.20)' : 'rgba(255,107,107,.20)'); glow.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = glow; c.fillRect(0, 0, W, H);
+    function pill(txt, x, y, col) { c.font = '600 18px ' + sans; var w = c.measureText(txt).width + 28; c.fillStyle = 'rgba(255,255,255,.07)'; rr(x, y, w, 32, 16); c.fill(); c.strokeStyle = 'rgba(255,255,255,.12)'; c.lineWidth = 1; rr(x, y, w, 32, 16); c.stroke(); c.fillStyle = col || '#c9d4e0'; c.textAlign = 'left'; c.fillText(txt, x + 14, y + 22); return x + w + 10; }
+    function rr(x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+    c.textAlign = 'left'; c.fillStyle = '#6aa9ff'; c.font = '700 18px ' + sans; c.fillText('AUTOPILOT  ·  PAPER TRADING', 56, 52);
+    c.fillStyle = '#f2f6fb'; c.font = '700 46px ' + sans; c.fillText(nm + '  ·  batch ' + b.no, 56, 106);
     var d0_ = new Date(b.start).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' });
-    c.fillStyle = '#8b98a8'; c.font = '500 22px ' + sans; c.fillText('Opened ' + d0_ + ' · ' + (b.open ? 'still open, live prices' : 'closed after 24 hours') + ' · profit after fees', 56, 106);
-    c.textAlign = 'right'; c.fillStyle = b.total >= 0 ? '#3ddc97' : '#ff6b6b'; c.font = '700 66px ' + sans; c.fillText(m0(b.total), W - 56, 84);
-    var cols = [['Short the strongest coins', b.legs.filter(function (l) { return l.side === 'SHORT'; })], ['Long the weakest coins', b.legs.filter(function (l) { return l.side === 'LONG'; })]], cw = 520, xs = [56, 624], top = 150;
-    var rows = Math.max(cols[0][1].length, cols[1][1].length, 1), rowH = Math.min(46, (H - top - 120) / rows);
+    var px = 56; px = pill('Perpetual futures', px, 126, '#e6edf3'); px = pill(info[2], px, 126, '#e6edf3'); px = pill('$250 margin per coin', px, 126); pill(b.open ? 'open, live prices' : 'closed after 24 h', px, 126, b.open ? '#f5a623' : '#8b98a8');
+    c.textAlign = 'right'; c.fillStyle = up0 ? UP : DN; c.font = '800 78px ' + sans; c.fillText(m0(b.total), W - 56, 100);
+    c.fillStyle = '#8b98a8'; c.font = '500 20px ' + sans; c.fillText('net after fees · opened ' + d0_, W - 56, 134);
+    var cols = [['Short the strongest coins', b.legs.filter(function (l) { return l.side === 'SHORT'; })], ['Long the weakest coins', b.legs.filter(function (l) { return l.side === 'LONG'; })]], cw = 524, xs = [56, 620], top = 192;
+    var rows = Math.max(cols[0][1].length, cols[1][1].length, 1), rowH = Math.min(46, (H - top - 92) / rows);
     cols.forEach(function (col, ci) {
       var x = xs[ci], tot = col[1].reduce(function (s, l) { return s + l.pnl; }, 0);
-      c.textAlign = 'left'; c.fillStyle = '#c9d4e0'; c.font = '600 22px ' + sans; c.fillText(col[0], x, top + 12);
-      c.textAlign = 'right'; c.fillStyle = tot >= 0 ? '#3ddc97' : '#ff6b6b'; c.font = '700 22px ' + sans; c.fillText(m0(tot), x + cw, top + 12);
-      c.strokeStyle = '#2b3948'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, top + 26); c.lineTo(x + cw, top + 26); c.stroke();
+      c.textAlign = 'left'; c.fillStyle = '#e6edf3'; c.font = '700 22px ' + sans; c.fillText(col[0], x, top + 6);
+      c.textAlign = 'right'; c.fillStyle = tot >= 0 ? UP : DN; c.font = '800 24px ' + sans; c.fillText(m0(tot), x + cw, top + 6);
+      c.strokeStyle = 'rgba(255,255,255,.14)'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, top + 20); c.lineTo(x + cw, top + 20); c.stroke();
       col[1].sort(function (a, b2) { return b2.pnl - a.pnl; }).forEach(function (l, i) {
-        var y = top + 34 + i * rowH, mid = y + rowH * 0.66, up = l.pnl >= 0;
-        if (i % 2 === 0) { c.fillStyle = 'rgba(255,255,255,.03)'; c.fillRect(x - 8, y, cw + 16, rowH); }
-        c.textAlign = 'left'; c.fillStyle = '#e6edf3'; c.font = '700 22px ' + sans; c.fillText(l.coin + (l.n > 1 ? ' ×' + l.n : ''), x, mid);
-        c.fillStyle = '#8b98a8'; c.font = '500 19px ' + sans; c.fillText(pxf(l.entry) + ' → ' + (l.exit == null ? '–' : pxf(l.exit)), x + 140, mid);
-        c.textAlign = 'right'; c.fillStyle = up ? '#3ddc97' : '#ff6b6b'; c.font = '700 22px ' + sans; c.fillText(m0(l.pnl).replace(/^([+-]\$\d+)$/, '$1'), x + cw, mid);
+        var y = top + 28 + i * rowH, mid = y + rowH * 0.66, win = l.pnl >= 0, mv = l.exit == null ? null : (l.side === 'LONG' ? 1 : -1) * (l.exit - l.entry) / l.entry * 100;
+        if (i % 2 === 0) { c.fillStyle = 'rgba(255,255,255,.035)'; rr(x - 8, y, cw + 16, rowH, 8); c.fill(); }
+        c.fillStyle = win ? UP : DN; rr(x - 8, y + 8, 4, rowH - 16, 2); c.fill();
+        c.textAlign = 'left'; c.fillStyle = '#f2f6fb'; c.font = '700 22px ' + sans; c.fillText(l.coin + (l.n > 1 ? ' ×' + l.n : ''), x + 6, mid);
+        c.fillStyle = '#8b98a8'; c.font = '500 18px ' + sans; c.fillText(pxf(l.entry) + ' → ' + (l.exit == null ? '–' : pxf(l.exit)), x + 150, mid);
+        c.textAlign = 'right'; if (mv != null) { c.fillStyle = win ? 'rgba(61,220,151,.75)' : 'rgba(255,107,107,.75)'; c.font = '600 17px ' + sans; c.fillText((mv >= 0 ? '+' : '−') + Math.abs(mv).toFixed(1) + '%', x + cw - 78, mid); }
+        c.fillStyle = win ? UP : DN; c.font = '800 23px ' + sans; c.fillText(m0(l.pnl), x + cw, mid);
       });
     });
-    c.textAlign = 'left'; c.fillStyle = '#5b6b7d'; c.font = '500 19px ' + sans; c.fillText('Entry → exit price' + (b.open ? ' (live)' : '') + ' · ' + SITE + ' · paper money, fees included, not financial advice', 56, H - 30);
+    c.textAlign = 'left'; c.fillStyle = '#6b7a8d'; c.font = '500 17px ' + sans; c.fillText('Price move shown in % of the coin, in the trade direction · profit = move × leverage − fees · ' + SITE, 56, H - 40);
+    c.fillText('Paper money on OKX perpetuals. Not financial advice.', 56, H - 16);
   }
   function copy(t) {
     if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function () { toast('Copied'); }, fb);
