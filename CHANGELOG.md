@@ -6,6 +6,15 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.25
+- Three new paper desks: Trend Flip, Risk-balanced Rev, Crash Shorter+
+- Trend Flip (`XXX:flip`): Neutral Rev reversed. Long the 8 strongest, short the 8 weakest by 24h change, $1,250 per leg, 24h hold, no stops. Tests momentum against reversion.
+- Risk-balanced Rev (`XXX:revv`): same picks as Neutral Rev, each leg sized by 1 / its 1-minute volatility (leg between $300 and $1,750, total targets $20,000), so long and short legs carry similar risk.
+- Crash Shorter+ (`XXX:algo3b`): Algo v3 with the market gate at 80% of coins down instead of 90%.
+- All three are in the daily snapshots, the control page kill switches and the research table (green when in profit). Paper only.
+- Removed two stray screenshots from the repo root.
+
 ## v1.24.1
 - Research table: green row follows total value (incl. open trades)
 

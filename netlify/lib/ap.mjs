@@ -397,6 +397,8 @@ export function algoSignal(m) {
 export const bounceFade = (r) => (r.F.bounce_pct >= 1.5 && r.F.ret_5m > 0 ? { side: 'SHORT' } : { why: 'no bounce to fade' });
 export const QUIET_HOURS_UTC = [11, 12, 13, 20, 21];
 export const ALGO3 = { tp: 2, sl: 1, holdMin: 120, cooldownMin: 15, breadth: 0.9 };
+/* Crash Shorter+ (:algo3b): Algo v3 with the market gate relaxed from 90% to 80% of coins down, so it trades more often. Everything else identical. */
+export const ALGO3B = { ...ALGO3, breadth: 0.8 };
 /* Wild desks: Algo entry rules, wider take-profit, same 0.6% stop. :algow = 1.2% TP / 60 min, :algox (extra wild) = 3% TP / 4 h. Forward test. */
 export const ALGOW = { tp: 1.2, sl: 0.6, holdMin: 60, cooldownMin: 10 }, ALGOX = { tp: 3, sl: 0.6, holdMin: 240, cooldownMin: 10 };
 /* Algo Top10 (:algot): Algo rules on the 10 coins with 5+ trades and best P/L in the first 40 h (AAVE TIA ICP ZEC ENA APT ARB OP ONDO DOT). Picked in hindsight, so this is a forward test of whether the pick holds. */
@@ -439,7 +441,7 @@ async function rev2Tick(db, rows, openPos, ctl, desk) {
 
 async function algoTick(db, r, openAlgo, closedAlgo, v, breadth, ctl) {
   v = v || 'algo';
-  const P = v === 'algow' ? ALGOW : v === 'algox' ? ALGOX : v === 'algo3' ? ALGO3 : v === 'algo2' ? { ...ALGO, cooldownMin: 15 } : ALGO;
+  const P = v === 'algow' ? ALGOW : v === 'algox' ? ALGOX : v === 'algo3' ? ALGO3 : v === 'algo3b' ? ALGO3B : v === 'algo2' ? { ...ALGO, cooldownMin: 15 } : ALGO;
   const key = r.coin + ':' + v, m = r.m;
   if (v === 'algot' && !ALGOT_COINS.includes(r.coin)) return 'not top10';
   const open = openAlgo[key];
@@ -449,7 +451,7 @@ async function algoTick(db, r, openAlgo, closedAlgo, v, breadth, ctl) {
   if (closed[0] && Date.now() - new Date(closed[0].closed_at).getTime() < P.cooldownMin * 60000) return 'cooldown';
   if (ctlBlocks(ctl, v, r.coin)) return 'paused';
   if (bank < 20 || (r.spread_bps != null && r.spread_bps > MAX_SPREAD_BPS)) return 'skip';
-  const sig = v === 'algoq' && QUIET_HOURS_UTC.includes(new Date().getUTCHours()) ? { why: 'quiet hours' } : v === 'algo3' ? (breadth >= ALGO3.breadth ? bounceFade(r) : { why: 'breadth ' + breadth.toFixed(2) + ' < gate' }) : v === 'algo2' ? bounceFade(r) : algoSignal(m);
+  const sig = v === 'algoq' && QUIET_HOURS_UTC.includes(new Date().getUTCHours()) ? { why: 'quiet hours' } : v === 'algo3' || v === 'algo3b' ? (breadth >= P.breadth ? bounceFade(r) : { why: 'breadth ' + breadth.toFixed(2) + ' < gate' }) : v === 'algo2' ? bounceFade(r) : algoSignal(m);
   if (!sig.side) return sig.why;
   const dir = sig.side === 'LONG' ? 1 : -1, notional = bank * LEV, d = decFor(m.price) + 2;
   await db.insert('ap_positions', { coin: key, side: sig.side, entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * P.tp / 100)).toFixed(d), sl: +(m.price * (1 - dir * P.sl / 100)).toFixed(d), max_hold_until: new Date(Date.now() + P.holdMin * 60000).toISOString() });
@@ -525,6 +527,37 @@ async function revTick(db, rows, openRev, ctl) {
   return out;
 }
 
+/* Two Neutral Reversal variants, same ranking and 24h batch cadence as :rev (no stops, 24h hold), forward test.
+   :flip  Trend Flip. Reversed: long the 8 STRONGEST, short the 8 WEAKEST by 24h change, $1,250 per leg. Tests whether momentum beats reversion in the current market.
+   :revv  Risk-balanced Rev. Same picks as :rev, but each leg is sized by 1 / its recent volatility (1-minute return stdev), so every leg carries about the same risk. Total notional targets $20,000 (16 x $1,250) but the caps can leave it lower; a leg is kept between $300 and $1,750 (1.2x to 7x of its $250 margin). */
+export const volOf = (r) => Math.max(+r.F.vol_1m || 0, 0.02);
+export function riskSizes(legs) {
+  const inv = legs.map(([r]) => 1 / volOf(r)), tot = inv.reduce((a, b) => a + b, 0), gross = legs.length * START * LEV;
+  return inv.map((w) => Math.min(START * 7, Math.max(START * 1.2, (gross * w) / tot)));
+}
+export function revVariantLegs(rk, desk) {
+  const weak = rk.slice(0, REV.K), strong = rk.slice(-REV.K);
+  const legs = desk === 'flip' ? weak.map((r) => [r, -1]).concat(strong.map((r) => [r, 1])) : weak.map((r) => [r, 1]).concat(strong.map((r) => [r, -1]));
+  const sizes = desk === 'revv' ? riskSizes(legs) : legs.map(() => START * LEV);
+  return legs.map(([r, dir], i) => [r, dir, sizes[i]]);
+}
+async function revVariantTick(db, rows, openPos, ctl, desk) {
+  const out = [], sfx = ':' + desk;
+  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
+  if (openPos.length) return out;
+  if (ctlBlocks(ctl, desk, '')) return out;
+  const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&order=opened_at.desc&limit=1').catch(() => []))[0];
+  if (last && Date.now() - new Date(last.opened_at).getTime() < REV.holdH * 3600000) return out;
+  const rk = rows.filter((r) => !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
+  if (rk.length < REV.K * 2 + 4) return out;
+  for (const [r, dir, notional] of revVariantLegs(rk, desk)) {
+    const m = r.m, d = decFor(m.price) + 2;
+    await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * 0.5)).toFixed(d), sl: +(m.price * (1 - dir * 0.5)).toFixed(d), max_hold_until: new Date(Date.now() + REV.holdH * 3600000).toISOString() });
+    out.push(desk + ' opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + r.coin + ' $' + Math.round(notional));
+  }
+  return out;
+}
+
 const shared0Breadth = (rows) => rows.filter((r) => r.F.ret_60m < 0).length / Math.max(1, rows.length);
 export async function tickAll(env) {
   if (!env.SUPABASE_SERVICE_KEY || !env.ANTHROPIC_API_KEY) return [{ skipped: 'missing keys' }];
@@ -536,8 +569,9 @@ export async function tickAll(env) {
   const pend = await db.select('ap_positions', 'select=*&status=eq.pending').catch(() => []);
   cnt.m += pend.filter((pp) => !/:rev/.test(pp.coin)).length;
   const pendRes = await Promise.all(pend.map((pp) => { const r = rows.find((x) => x.coin === pp.coin.split(':')[0]); return r ? limitTick(db, pp, r.m).then((x) => { if (x !== 'waiting' && !/:rev/.test(pp.coin)) cnt.m--; return pp.coin + ' ' + x; }).catch(() => null) : null; }));
-  for (const p of openAll) if (p.coin.endsWith(':algo') || p.coin.endsWith(':algo2') || p.coin.endsWith(':algo3') || p.coin.endsWith(':algoq') || p.coin.endsWith(':algow') || p.coin.endsWith(':algox') || p.coin.endsWith(':algot')) openAlgo[p.coin] = p;
+  for (const p of openAll) if (p.coin.endsWith(':algo') || p.coin.endsWith(':algo2') || p.coin.endsWith(':algo3') || p.coin.endsWith(':algo3b') || p.coin.endsWith(':algoq') || p.coin.endsWith(':algow') || p.coin.endsWith(':algox') || p.coin.endsWith(':algot')) openAlgo[p.coin] = p;
   const openRev = {}; for (const p of openAll) if (p.coin.endsWith(':rev')) openRev[p.coin] = p;
+  const openFlip = openAll.filter((p) => p.coin.endsWith(':flip')), openRevv = openAll.filter((p) => p.coin.endsWith(':revv'));
   const openRev2 = openAll.filter((p) => p.coin.endsWith(':rev2')), openRevm = openAll.filter((p) => p.coin.endsWith(':revm'));
   const openSet = new Set(open.map((p) => p.coin)), closedAlgo = {};
   for (const x of await selectAll(db, 'ap_positions', 'select=coin,pnl,closed_at&status=eq.closed&coin=like.*:algo&order=closed_at.desc,id.desc').catch(() => [])) (closedAlgo[x.coin] = closedAlgo[x.coin] || []).push(x);
@@ -547,10 +581,13 @@ export async function tickAll(env) {
   for (const x of await selectAll(db, 'ap_positions', 'select=coin,pnl,closed_at&status=eq.closed&coin=like.*:algow&order=closed_at.desc,id.desc').catch(() => [])) (closedAlgo[x.coin] = closedAlgo[x.coin] || []).push(x);
   for (const x of await selectAll(db, 'ap_positions', 'select=coin,pnl,closed_at&status=eq.closed&coin=like.*:algox&order=closed_at.desc,id.desc').catch(() => [])) (closedAlgo[x.coin] = closedAlgo[x.coin] || []).push(x);
   for (const x of await selectAll(db, 'ap_positions', 'select=coin,pnl,closed_at&status=eq.closed&coin=like.*:algot&order=closed_at.desc,id.desc').catch(() => [])) (closedAlgo[x.coin] = closedAlgo[x.coin] || []).push(x);
-  const breadth = shared0Breadth(rows), VN = ['algo', 'algo2', 'algo3', 'algoq', 'algow', 'algox', 'algot'], TAG = [' ', ' v2 ', ' v3 ', ' q ', ' w ', ' x ', ' t '];
+  for (const x of await selectAll(db, 'ap_positions', 'select=coin,pnl,closed_at&status=eq.closed&coin=like.*:algo3b&order=closed_at.desc,id.desc').catch(() => [])) (closedAlgo[x.coin] = closedAlgo[x.coin] || []).push(x);
+  const breadth = shared0Breadth(rows), VN = ['algo', 'algo2', 'algo3', 'algoq', 'algow', 'algox', 'algot', 'algo3b'], TAG = [' ', ' v2 ', ' v3 ', ' q ', ' w ', ' x ', ' t ', ' v3+ '];
   const revRes = await revTick(db, rows, openRev, ctl).catch((e) => ['rev error ' + String(e.message || e).slice(0, 60)]);
   const rev2Res = await rev2Tick(db, rows, openRev2, ctl, 'rev2').catch((e) => ['rev2 error ' + String(e.message || e).slice(0, 60)]);
   const revmRes = await rev2Tick(db, rows, openRevm, ctl, 'revm').catch((e) => ['revm error ' + String(e.message || e).slice(0, 60)]);
+  const flipRes = await revVariantTick(db, rows, openFlip, ctl, 'flip').catch((e) => ['flip error ' + String(e.message || e).slice(0, 60)]);
+  const revvRes = await revVariantTick(db, rows, openRevv, ctl, 'revv').catch((e) => ['revv error ' + String(e.message || e).slice(0, 60)]);
   const algoRes = await Promise.all(VN.flatMap((v, vi) => rows.map((r) => algoTick(db, r, openAlgo, closedAlgo, v, breadth, ctl).then((s) => r.coin + TAG[vi] + s).catch((e) => r.coin + ' error ' + String(e.message || e).slice(0, 60)))));
   const mirRes = await Promise.all(openMir.map((pp) => { const r = rows.find((x) => x.coin === pp.coin.split(':')[0]); return r ? manageOpen(db, pp, r.m).then((x) => { if (x.closed) cnt[modeOf(pp.coin)]--; return x.closed ? pp.coin + ' closed ' + x.pnl.toFixed(2) : null; }).catch(() => null) : null; }));
   const rets = rows.map((r) => r.F.ret_60m).sort((x, y) => x - y), btc = rows.find((r) => r.coin === 'BTC');
@@ -568,7 +605,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = Array.from(openSet).concat(picks).filter((s) => COINS[s]);
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */
