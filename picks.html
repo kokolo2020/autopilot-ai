@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot My Picks</title>
+<style>
+  :root { --bg:#0b0f14; --card:#121922; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --acc:#6aa9ff; --up:#3ddc97; --dn:#ff6b6b; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f4f6f9; --card:#fff; --line:#dde3ea; --text:#17202b; --mut:#5b6b7d; --acc:#2c6fd6; --up:#1a8f5f; --dn:#c0392b; } }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:900px; margin:0 auto; padding:16px; } h1 { font-size:20px; margin:0 0 4px; } .sub, .mut { color:var(--mut); font-size:12px; } a { color:var(--acc); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:14px 0; } .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; } .card small { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.05em; } .card b { display:block; font:700 22px ui-monospace,monospace; margin-top:2px; }
+  .scroll { overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--card); } table { border-collapse:collapse; width:100%; font-size:13px; white-space:nowrap; }
+  th, td { padding:8px 10px; text-align:right; border-bottom:1px solid var(--line); } th:first-child, td:first-child { text-align:left; font-weight:700; } th { color:var(--mut); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; } tr:last-child td { border-bottom:0; }
+  .up { color:var(--up); } .dn { color:var(--dn); } .bar { display:inline-block; height:6px; border-radius:3px; vertical-align:middle; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>My picks</h1>
+  <div class="sub" id="st">Loading...</div>
+  <div class="cards" id="cards"></div>
+  <div class="scroll"><table id="t"></table></div>
+  <p class="mut" id="miss"></p>
+  <p class="mut">20 coins you chose, $250 margin each at 3x on OKX perpetuals ($750 per position, $5,000 in total), all long, opened once and held with no daily close. A leg is closed as "liquidated" at -32%. P&amp;L is the price move on the $750 position, before fees and funding (both are booked when a leg closes). Paper money. <a href="/research">Back to research</a> · <a href="/regime.html">Market regimes</a></p>
+</div>
+<script>
+(function () {
+  var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
+  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
+  var WANT = ['ZEN', 'NEAR', 'OP', 'ARB', 'RUNE', 'JTO', 'MON', 'EGLD', 'HYPE', 'SOL', 'SUI', 'GRAM', 'WLD', 'VVV', 'JUP', 'RAY', 'AERO', 'XRP', 'AVAX', 'CARDS'];
+  var $ = function (i) { return document.getElementById(i); }, money = function (n) { return (n < 0 ? '-' : '+') + '$' + Math.abs(n).toFixed(2); }, pct = function (n) { return (n < 0 ? '' : '+') + n.toFixed(2) + '%'; }, cls = function (n) { return n < 0 ? 'dn' : n > 0 ? 'up' : ''; };
+  var pos = [], px = {};
+  function get(t, q) { return fetch(URL_ + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
+  function paint() {
+    var rows = pos.map(function (p) {
+      var c = p.coin.split(':')[0], e = +p.entry_price, n = +p.notional, closed = p.status === 'closed', last = closed ? +p.exit_price : px[c], chg = last ? (last / e - 1) * 100 : null, pnl = closed ? +p.pnl : last ? n * (last / e - 1) : 0;
+      return { c: c, e: e, n: n, last: last, chg: chg, pnl: pnl, closed: closed, why: p.close_reason };
+    }).sort(function (a, b) { return b.pnl - a.pnl; });
+    var sum = rows.reduce(function (s, r) { return s + r.pnl; }, 0), margin = rows.reduce(function (s, r) { return s + r.n / 3; }, 0), best = rows[0], worst = rows[rows.length - 1], win = rows.filter(function (r) { return r.pnl > 0; }).length;
+    $('cards').innerHTML = [['Open P&L', '<span class="' + cls(sum) + '">' + money(sum) + '</span>'], ['Margin value', '$' + (margin + sum).toFixed(2)], ['Return on margin', '<span class="' + cls(sum) + '">' + pct(margin ? sum / margin * 100 : 0) + '</span>'], ['In profit', win + ' / ' + rows.length], ['Best', best ? best.c + ' ' + money(best.pnl) : '–'], ['Worst', worst ? worst.c + ' ' + money(worst.pnl) : '–']].map(function (x) { return '<div class="card"><small>' + x[0] + '</small><b>' + x[1] + '</b></div>'; }).join('');
+    var mx = Math.max.apply(null, rows.map(function (r) { return Math.abs(r.pnl); }).concat([1]));
+    $('t').innerHTML = '<tr><th>Coin</th><th>Entry</th><th>Last</th><th>Move</th><th>P&amp;L</th><th></th><th>Return on $250</th></tr>' + (rows.length ? rows.map(function (r) {
+      return '<tr><td>' + r.c + (r.closed ? ' <span class="mut">(' + (r.why || 'closed') + ')</span>' : '') + '</td><td>' + r.e + '</td><td>' + (r.last ? +r.last.toPrecision(6) : '–') + '</td><td class="' + cls(r.chg || 0) + '">' + (r.chg == null ? '–' : pct(r.chg)) + '</td><td class="' + cls(r.pnl) + '">' + money(r.pnl) + '</td><td style="text-align:left"><span class="bar" style="width:' + Math.round(Math.abs(r.pnl) / mx * 70) + 'px;background:var(--' + (r.pnl < 0 ? 'dn' : 'up') + ')"></span></td><td class="' + cls(r.pnl) + '">' + pct(r.pnl / (r.n / 3) * 100) + '</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="mut">No positions yet. They open on the next 5-minute tick after the desk goes live.</td></tr>');
+    var have = {}; pos.forEach(function (p) { have[p.coin.split(':')[0]] = 1; });
+    var miss = WANT.filter(function (c) { return !have[c]; });
+    $('miss').textContent = miss.length ? 'Not open yet: ' + miss.join(', ') + '. These are either waiting for the next tick or have no OKX USDT perpetual; the desk retries them every tick.' : '';
+    $('st').textContent = 'Updated ' + new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Bangkok' }) + ' Bangkok · live prices from OKX, refreshes every 30 s';
+  }
+  function load() { return Promise.all([get('ap_positions', 'select=coin,status,entry_price,exit_price,notional,pnl,close_reason&coin=like.*:pick&order=id.asc&limit=100'), fetch('/.netlify/functions/prices').then(function (r) { return r.json(); }).catch(function () { return {}; })]).then(function (r) { pos = r[0]; px = r[1]; paint(); }).catch(function (e) { $('st').textContent = 'Could not load: ' + e.message; }); }
+  load(); setInterval(load, 30000);
+})();
+</script>
+</body>
+</html>

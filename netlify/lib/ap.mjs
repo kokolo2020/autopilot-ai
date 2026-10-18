@@ -211,7 +211,7 @@ export const SPOT = { fee: 0.001, borrowPerDay: 0.0003, longLeg: 200, pairLeg: 1
 export const spotFees = (p, endMs) => +p.notional * SPOT.fee * 2 + (/:spm$/.test(p.coin) && p.side === 'SHORT' ? +p.notional * SPOT.borrowPerDay * Math.max(0, (endMs - new Date(p.opened_at).getTime()) / 864e5) : 0);
 const closePos = async (db, p, exit, why) => {
   const dir = p.side === 'LONG' ? 1 : -1;
-  const funding = /:r3[dwmyl]$/.test(p.coin) ? await rev3Funding(p).catch(() => 0) : 0;
+  const funding = /:(r3[dwmyl]|pick)$/.test(p.coin) ? await rev3Funding(p).catch(() => 0) : 0;
   const fees = /:sp[lm]$/.test(p.coin) ? spotFees(p, Date.now()) : /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - RM * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + FEE) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
   await db.update('ap_positions', 'id=eq.' + p.id, { status: 'closed', exit_price: exit, closed_at: new Date().toISOString(), pnl, fees, close_reason: funding ? why + ' | funding ' + (funding >= 0 ? '+' : '') + funding.toFixed(2) : why });
   return pnl;
@@ -788,6 +788,26 @@ export async function revxTick(db, rows, openPos, ctl) {
   return out;
 }
 
+/* :pick My picks (paper, Koko's own 20 coins). $250 margin each at 3x on OKX perpetuals ($750 notional, $5,000 in total), all LONG, opened once at the first tick and then held (no daily close, no take profit).
+   A long at 3x is liquidated near -33%, so a leg is closed at -32% as "liquidated". Funding is booked into pnl when a leg closes. Coins with no OKX USDT perpetual are skipped and listed on picks.html. */
+export const MYPICKS = { coins: ['ZEN', 'NEAR', 'OP', 'ARB', 'RUNE', 'JTO', 'MON', 'EGLD', 'HYPE', 'SOL', 'SUI', 'GRAM', 'WLD', 'VVV', 'JUP', 'RAY', 'AERO', 'XRP', 'AVAX', 'CARDS'], margin: 250, lev: 3, liqAt: -0.32 };
+export async function picksTick(db, ctl) {
+  const out = [];
+  if (ctlBlocks(ctl, 'pick', '')) return out;
+  const all = await db.select('ap_positions', 'select=id,coin,status,entry_price,notional,opened_at,side&coin=like.*:pick&limit=200');
+  const tk = {}; for (const t of await okx('/api/v5/market/tickers?instType=SWAP')) tk[t.instId] = { last: +t.last, ask: +t.askPx > 0 ? +t.askPx : +t.last };
+  for (const p of all.filter((x) => x.status === 'open')) { const t = tk[p.coin.split(':')[0] + '-USDT-SWAP']; if (t && t.last <= +p.entry_price * (1 + MYPICKS.liqAt)) { const x = await closePos(db, p, +p.entry_price * (1 + MYPICKS.liqAt), 'liquidated'); out.push(p.coin + ' liquidated ' + x.toFixed(2)); } }
+  const had = new Set(all.map((x) => x.coin.split(':')[0]));
+  for (const c of MYPICKS.coins) {
+    if (had.has(c)) continue;
+    const t = tk[c + '-USDT-SWAP']; if (!t || !(t.ask > 0)) { out.push('pick ' + c + ' has no OKX USDT perpetual'); continue; }
+    const notional = MYPICKS.margin * MYPICKS.lev, d = decFor(t.ask);
+    await db.insert('ap_positions', { coin: c + ':pick', side: 'LONG', entry_price: t.ask, size: notional / t.ask, notional, tp: +(t.ask * 100).toFixed(d), sl: +(t.ask * (1 + MYPICKS.liqAt)).toFixed(d), max_hold_until: '2099-12-31T00:00:00Z' });
+    out.push('pick opened LONG ' + c + ' $' + notional);
+  }
+  return out;
+}
+
 /* ---------- Funding Carry (paper): $5,000 of spot + $5,000 short perpetual at 1x, split over 20 coins ($250 per leg per coin) ----------
    Each slot holds one coin: buy $250 spot and short $250 of the USDT perpetual (1x, so no liquidation risk to speak of). Price moves cancel; the profit is the funding the short receives
    every settlement (00:00, 08:00, 16:00 UTC; some coins settle every 4h) while the rate is positive. Slots are filled with the 20 coins that have the highest positive funding among the top-coin list
@@ -885,6 +905,7 @@ export async function tickAll(env) {
   const revwRes = await revVariantTick(db, rows, openRevw, ctl, 'revw').catch((e) => ['revw error ' + String(e.message || e).slice(0, 60)]);
   const rev2sRes = await rev2Tick(db, rows, openRev2s, ctl, 'rev2s').catch((e) => ['rev2s error ' + String(e.message || e).slice(0, 60)]);
   const revxRes = await revxTick(db, rows, openRevx, ctl).catch((e) => ['revx error ' + String(e.message || e).slice(0, 60)]);
+  const pickRes = await picksTick(db, ctl).catch((e) => ['pick error ' + String(e.message || e).slice(0, 80)]);
   const revsRes = await revVariantTick(db, rows, openRevs, ctl, 'revs').catch((e) => ['revs error ' + String(e.message || e).slice(0, 60)]);
   const capRes = await revVariantTick(db, rows, openCap, ctl, 'caprev').catch((e) => ['caprev error ' + String(e.message || e).slice(0, 60)]);
   const r3Res = {}; for (const k of Object.keys(REV3.hours)) r3Res[k] = await rev3Tick(db, rows, openR3[k], ctl, k).catch((e) => [k + ' error ' + String(e.message || e).slice(0, 60)]);
@@ -906,7 +927,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, revx: revxRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */

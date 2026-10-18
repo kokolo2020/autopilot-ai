@@ -48,3 +48,6 @@ Rev 2 exactly as it is (4x, 10% price stop, reopens at 5x/6x/7x), plus the winne
 
 ## Extra: Reverse extremes (added 18 Oct)
 After each 20:00 close, the previous Neutral Rev batch's best and worst legs (by net P&L) are re-entered with the side reversed ($100 margin each, 5x), held to the next 20:00. Two legs a day: a tiny sample, forward test only.
+
+## Extra: My picks (added 18 Oct)
+Koko's own 20 coins (ZEN, NEAR, OP, ARB, RUNE, JTO, MON, EGLD, HYPE, SOL, SUI, GRAM, WLD, VVV, JUP, RAY, AERO, XRP, AVAX, CARDS): $250 margin each at 3x on OKX perpetuals ($750 notional, $5,000 total), all long (assumed), opened once and held, no daily close. Closed as "liquidated" at -32%. Coins with no OKX USDT perpetual are skipped and retried each tick. Page: /picks.html.

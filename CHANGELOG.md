@@ -46,6 +46,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.39
+- New section: My picks (Koko's 20 coins, $250 margin each at 3x long, held) with its own page
+
 ## v1.38.3
 - New page: Market regimes (desk P&L per 8pm batch against the market move, with averages for down / flat / up days)
 
