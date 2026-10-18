@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot Tide Room</title>
+<style>
+  :root { --bg:#070b11; --card:#0e151e; --line:#1b2633; --text:#e6edf3; --mut:#8b98a8; --up:#3ddc97; --down:#ff6b6b; --acc:#6aa9ff; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#eef2f7; --card:#fff; --line:#d8e0ea; --text:#17202b; --mut:#5b6b7d; --up:#13875a; --down:#c93c3c; --acc:#2c6fd6; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:1180px; margin:0 auto; padding:16px; }
+  h1 { font-size:18px; margin:0 0 4px; letter-spacing:.06em; } h1 small { color:var(--mut); font-weight:500; font-size:12px; letter-spacing:0; }
+  .sub { color:var(--mut); font-size:12px; margin-bottom:14px; } a { color:var(--acc); }
+  .top { display:flex; gap:16px; align-items:center; flex-wrap:wrap; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:12px 16px; margin-bottom:14px; }
+  .top canvas { width:96px; height:96px; flex:none; }
+  .big { font:700 26px var(--mono); } .lbl { color:var(--mut); font-size:12px; letter-spacing:.06em; text-transform:uppercase; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px; }
+  .tank { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:10px; position:relative; }
+  .tank canvas { width:100%; height:auto; display:block; border-radius:10px; }
+  .tank h3 { margin:0 0 6px; font-size:14px; display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
+  .tank h3 span { font:600 13px var(--mono); }
+  .tank p { margin:6px 0 0; font-size:11px; color:var(--mut); min-height:30px; }
+  .up { color:var(--up); } .down { color:var(--down); } .mut { color:var(--mut); }
+  .tip { position:fixed; pointer-events:none; background:var(--text); color:var(--bg); padding:4px 8px; border-radius:8px; font:600 12px var(--mono); display:none; z-index:5; }
+  .rk { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 14px; } .rk span { background:var(--card); border:1px solid var(--line); border-radius:999px; padding:3px 10px; font:600 12px var(--mono); }
+  .legend { color:var(--mut); font-size:12px; margin-top:14px; line-height:1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AUTOPILOT TIDE ROOM <small><span id="ver"></span> · paper money · <a href="/research.html">Research</a> · <a href="/horizons.html">Horizons</a></small></h1>
+  <div class="sub">Every strategy is a tank. The dashed line is the $1,000 it started with. Water above the line means the desk is ahead; below means behind. Each bubble is one open trade. Everything closes at 20:00 Bangkok.</div>
+  <div class="top">
+    <canvas id="ring" width="192" height="192" aria-label="Countdown to the 8pm Bangkok close"></canvas>
+    <div><div class="lbl">Next close</div><div class="big" id="cd">--</div><div class="mut" id="cdsub">20:00 Bangkok</div></div>
+    <div><div class="lbl">All desks together</div><div class="big" id="tot">--</div><div class="mut" id="totsub"></div></div>
+    <div id="best"></div>
+  </div>
+  <div class="rk" id="rk"></div>
+  <div class="grid" id="grid"></div>
+  <div class="legend">Green bubble = trade in profit, red = in loss, bigger = larger move. Solid ring = long (or bought), dashed ring = short (or borrowed). Waves are for looks; the numbers are real paper P&amp;L after fees. Hover a bubble to see the coin.</div>
+</div>
+<div class="tip" id="tip"></div>
+<script>
+(function () {
+  var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
+  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
+  var BANK = 1000, CLOSE_H = 13;
+  var DESKS = [
+    ['rev', 'Neutral Rev', '5x, no stops', 0.00055], ['rev2', 'Rev 2', '4x to 7x, stop', 0.00055], ['revm', 'Rev 2 limit', 'limit entries', 0.00055],
+    ['r3d', 'Rev 3 daily', '4x to 7x, $10 stop', 0.00055], ['r3l', 'Rev 3 low-leverage', '2x to 3x, $10 stop', 0.00055], ['caprev', 'Capitulation Rev', 'trades only after a falling day', 0.00055],
+    ['revw', 'Neutral Rev weekly', 'closes day 7', 0.00055], ['spl', 'Spot long-only', 'no perps', 0.001], ['spm', 'Spot margin Rev', 'no perps, borrowed shorts', 0.001],
+    ['carry', 'Funding carry', 'spot + short perp', 0], ['dfc', 'Dated-futures carry', 'spot + short future', 0]
+  ];
+  var $ = function (id) { return document.getElementById(id); };
+  var money = function (n) { return (n < 0 ? '-' : n > 0 ? '+' : '') + '$' + Math.abs(n).toFixed(2); };
+  var cls = function (n) { return n > 0.005 ? 'up' : n < -0.005 ? 'down' : 'mut'; };
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var css = function (v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); };
+  var S = { desks: [], px: {} }, cards = {}, rawErr = null;
+  fetch('/version.json?t=' + Date.now()).then(function (r) { return r.json(); }).then(function (v) { $('ver').textContent = 'ap-v' + v.version; }).catch(function () {});
+  function get(t, q) { return fetch(URL_ + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
+
+  function build(pos, carry, px) {
+    return DESKS.map(function (d) {
+      var k = d[0], legs = [], real = 0;
+      if (k === 'carry' || k === 'dfc') {
+        carry.filter(function (r) { var dated = String(r.coin).indexOf('-') > 0; return k === 'dfc' ? dated : !dated; }).forEach(function (r) {
+          real += +r.net_pnl || 0; if (r.status === 'open') legs.push({ coin: String(r.coin).replace('-USDT-', ' '), side: 'LONG', pnl: +r.net_pnl || 0 });
+        });
+      } else {
+        pos.filter(function (p) { return p.coin.slice(-(k.length + 1)) === ':' + k; }).forEach(function (p) {
+          if (p.status === 'closed') { real += +p.pnl || 0; return; }
+          if (p.status !== 'open') return;
+          var l = px[p.coin.split(':')[0]], n = +p.notional, e = +p.entry_price, v = 0;
+          if (l != null && e) v = n * (p.side === 'LONG' ? 1 : -1) * (l - e) / e - n * d[3] * 2;
+          legs.push({ coin: p.coin.split(':')[0], side: p.side, pnl: v });
+        });
+      }
+      var open = legs.reduce(function (s, x) { return s + x.pnl; }, 0);
+      return { key: k, name: d[1], sub: d[2], real: real, open: open, eq: BANK + real + (k === 'carry' || k === 'dfc' ? 0 : open), legs: legs };
+    });
+  }
+  function load() {
+    Promise.all([get('ap_positions', 'select=coin,side,status,notional,entry_price,pnl&order=opened_at.desc&limit=5000'), get('ap_carry', 'select=coin,status,net_pnl&limit=500').catch(function () { return []; }), get('ap_samples', 'select=coin,price,ts&order=ts.desc&limit=400')]).then(function (r) {
+      var px = {}; r[2].forEach(function (x) { if (px[x.coin] == null) px[x.coin] = +x.price; });
+      S.desks = build(r[0], r[1], px); rawErr = null; paint();
+    }).catch(function (e) { rawErr = e.message; $('totsub').textContent = 'Could not load data: ' + e.message; });
+  }
+
+  function paint() {
+    var g = $('grid');
+    S.desks.forEach(function (d) {
+      var c = cards[d.key];
+      if (!c) {
+        var el = document.createElement('div'); el.className = 'tank';
+        el.innerHTML = '<h3><b></b><span></span></h3><canvas width="500" height="360"></canvas><p></p>';
+        g.appendChild(el); c = cards[d.key] = { el: el, cv: el.querySelector('canvas'), h: el.querySelector('h3 b'), v: el.querySelector('h3 span'), p: el.querySelector('p'), lvl: 0.5, seed: Math.random() * 6 };
+        c.cv.addEventListener('mousemove', function (ev) { hover(ev, d.key); }); c.cv.addEventListener('mouseleave', function () { $('tip').style.display = 'none'; });
+      }
+      c.d = d; var tot = d.eq - BANK;
+      c.h.textContent = d.name; c.v.textContent = money(tot); c.v.className = cls(tot);
+      c.p.innerHTML = d.sub + ' · $' + d.eq.toFixed(2) + (d.legs.length ? ' · ' + d.legs.length + ' open' : ' · none open');
+    });
+    var all = S.desks.reduce(function (s, d) { return s + (d.eq - BANK); }, 0), n = S.desks.length;
+    $('tot').textContent = money(all); $('tot').className = 'big ' + cls(all); $('totsub').textContent = n + ' desks x $' + BANK + ' = $' + (n * BANK).toLocaleString();
+    var rank = S.desks.slice().sort(function (a, b) { return b.eq - a.eq; });
+    $('rk').innerHTML = rank.map(function (d, i) { return '<span class="' + cls(d.eq - BANK) + '">' + (i + 1) + '. ' + d.name + ' ' + money(d.eq - BANK) + '</span>'; }).join('');
+    $('best').innerHTML = rank.length ? '<div class="lbl">In front</div><div class="big ' + cls(rank[0].eq - BANK) + '" style="font-size:18px">' + rank[0].name + '</div>' : '';
+  }
+
+  var bub = {}; /* per-card bubble hit boxes for the tooltip */
+  function hover(ev, key) {
+    var c = cards[key], r = c.cv.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * c.cv.width, y = (ev.clientY - r.top) / r.height * c.cv.height, hit = null;
+    (bub[key] || []).forEach(function (b) { if ((b.x - x) * (b.x - x) + (b.y - y) * (b.y - y) <= (b.r + 4) * (b.r + 4)) hit = b; });
+    var t = $('tip'); if (!hit) { t.style.display = 'none'; return; }
+    t.textContent = hit.l.coin + ' ' + (hit.l.side === 'LONG' ? 'long' : 'short') + ' ' + money(hit.l.pnl); t.style.left = ev.clientX + 12 + 'px'; t.style.top = ev.clientY + 12 + 'px'; t.style.display = 'block';
+  }
+  function tankDraw(c, t) {
+    var cv = c.cv, x = cv.getContext('2d'), W = cv.width, H = cv.height, d = c.d; if (!d) return;
+    var up = css('--up'), dn = css('--down'), line = css('--line'), mut = css('--mut'), txt = css('--text');
+    var span = Math.max(40, Math.min(300, Math.max.apply(null, S.desks.map(function (z) { return Math.abs(z.eq - BANK); })) * 1.3));
+    var target = 0.5 - Math.max(-1, Math.min(1, (d.eq - BANK) / span)) * 0.38; c.lvl += (target - c.lvl) * (reduce ? 1 : 0.04);
+    var yl = H * c.lvl, ahead = d.eq >= BANK, col = ahead ? up : dn;
+    x.clearRect(0, 0, W, H);
+    x.save(); var rr = 18; x.beginPath(); x.moveTo(rr, 0); x.arcTo(W, 0, W, H, rr); x.arcTo(W, H, 0, H, rr); x.arcTo(0, H, 0, 0, rr); x.arcTo(0, 0, W, 0, rr); x.closePath(); x.clip();
+    x.fillStyle = 'rgba(128,150,175,.07)'; x.fillRect(0, 0, W, H);
+    /* two wave layers; the front layer moves faster */
+    [[0.55, 1.0, 9, 0.9], [1, 1.5, 6, 1.4]].forEach(function (w, i) {
+      x.beginPath(); x.moveTo(0, H);
+      for (var px = 0; px <= W; px += 6) x.lineTo(px, yl + Math.sin(px / (60 / w[1]) + t * w[3] + c.seed + i) * w[2]);
+      x.lineTo(W, H); x.closePath(); x.globalAlpha = w[0] * 0.55; x.fillStyle = col; x.fill();
+    });
+    x.globalAlpha = 1;
+    /* the $1,000 line */
+    var y0 = H * 0.5; x.setLineDash([7, 6]); x.strokeStyle = txt; x.globalAlpha = 0.55; x.lineWidth = 1.5; x.beginPath(); x.moveTo(0, y0); x.lineTo(W, y0); x.stroke(); x.setLineDash([]); x.globalAlpha = 1;
+    x.fillStyle = txt; x.globalAlpha = 0.7; x.font = '600 20px ui-monospace,monospace'; x.fillText('$1,000', 12, y0 - 8); x.globalAlpha = 1;
+    /* bubbles */
+    var hb = []; bub[d.key] = hb; var n = d.legs.length;
+    d.legs.slice().sort(function (a, b) { return a.pnl - b.pnl; }).forEach(function (l, i) {
+      var bx = W * (i + 1) / (n + 1), r = 12 + Math.min(18, Math.abs(l.pnl) * 4), by = Math.min(H - r - 6, Math.max(yl + r + 10, yl + 26 + (i % 3) * 36)) + Math.sin(t * 1.3 + i * 1.7 + c.seed) * 7 * (reduce ? 0 : 1);
+      var win = l.pnl >= 0; x.beginPath(); x.arc(bx, by, r, 0, 7); x.fillStyle = win ? up : dn; x.globalAlpha = 0.5; x.fill(); x.globalAlpha = 1;
+      x.lineWidth = 2.5; x.strokeStyle = win ? up : dn; x.setLineDash(l.side === 'LONG' ? [] : [5, 4]); x.stroke(); x.setLineDash([]);
+      x.fillStyle = txt; x.font = '700 ' + Math.max(11, Math.min(15, r * 0.7)) + 'px ui-monospace,monospace'; x.textAlign = 'center'; x.fillText(String(l.coin).slice(0, 5), bx, by + 4); x.textAlign = 'left';
+      hb.push({ x: bx, y: by, r: r, l: l });
+    });
+    if (!n) { x.fillStyle = mut; x.font = '600 20px system-ui'; x.fillText('waiting for the next batch', 14, H - 16); }
+    x.restore(); x.strokeStyle = line; x.lineWidth = 2; x.strokeRect(0, 0, W, H);
+  }
+
+  /* the 8pm ring: a sun that sets as the close approaches */
+  function nextClose(now) { var d = new Date(now), t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), CLOSE_H); if (t <= now) t += 86400000; return t; }
+  function ring(t) {
+    var cv = $('ring'), x = cv.getContext('2d'), W = cv.width, now = Date.now(), nc = nextClose(now), left = nc - now, frac = 1 - left / 86400000;
+    var acc = css('--acc'), line = css('--line'), txt = css('--text'), cx = W / 2, cy = W / 2;
+    x.clearRect(0, 0, W, W); x.lineWidth = 12; x.strokeStyle = line; x.beginPath(); x.arc(cx, cy, 78, 0, 7); x.stroke();
+    x.strokeStyle = acc; x.lineCap = 'round'; x.beginPath(); x.arc(cx, cy, 78, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); x.stroke();
+    var a = -Math.PI / 2 + frac * Math.PI * 2, sx = cx + Math.cos(a) * 78, sy = cy + Math.sin(a) * 78, pulse = reduce ? 0 : Math.sin(t * 3) * 2;
+    x.fillStyle = '#f5a623'; x.beginPath(); x.arc(sx, sy, 11 + pulse, 0, 7); x.fill();
+    x.fillStyle = txt; x.font = '700 30px ui-monospace,monospace'; x.textAlign = 'center'; x.fillText('8pm', cx, cy + 10); x.textAlign = 'left';
+    var h = Math.floor(left / 3600000), m = Math.floor(left % 3600000 / 60000); $('cd').textContent = h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
+  }
+  var t0 = performance.now();
+  function frame(ts) {
+    var t = (ts - t0) / 1000; ring(t);
+    Object.keys(cards).forEach(function (k) { tankDraw(cards[k], t); });
+    if (!reduce) requestAnimationFrame(frame);
+  }
+  if (reduce) setInterval(function () { frame(performance.now()); }, 5000);
+  requestAnimationFrame(frame);
+  load(); setInterval(load, 60000);
+})();
+</script>
+</body>
+</html>
