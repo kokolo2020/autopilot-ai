@@ -442,12 +442,31 @@ export const boundaryAt = (now) => { const d = new Date(now); let t = Date.UTC(d
 export const nextClose = (now, days = 1) => boundaryAt(now) + days * 86400000;
 export const batchDue = (last, now, days = 1) => !last || new Date(last.opened_at).getTime() < boundaryAt(now) - (days - 1) * 86400000;
 export const REV2 = { K: 5, holdH: 24, lev0: 4, levMax: 7, stopPct: 0.10 }; // stop was 15% until v1.27; a back-test on 43 batches found 10% earned more with a smaller worst batch
-const rev2Lev = (p) => Math.round(+p.notional / RM), rev2Stop = (lev) => Math.min(REV2.stopPct, 1 / lev - 0.01);
+const rev2Lev = (p) => (/^so-w:/.test(p.close_reason || '') ? +p.close_reason.split(':')[2] : Math.round(+p.notional / RM)), rev2Stop = (lev) => Math.min(REV2.stopPct, 1 / lev - 0.01);
+/* :rev2s Rev 2 + winner scale-out (paper). Rev 2 exactly as it is (4x, 10% price stop, reopens 5x/6x/7x on a stop), plus the winner exit from the scale-out desk: when a leg reaches +7% of its $100 margin, sell half; the other half closes at +10% or when it falls back to +5%. Losers are left to Rev 2's own stop and reset logic. */
+export async function rev2WinnerOut(db, p, m) {
+  const dir = p.side === 'LONG' ? 1 : -1, e = +p.entry_price, lev = rev2Lev(p), d = decFor(e) + 2, L = (f) => +(e * (1 + dir * f / lev)).toFixed(d), adv = (k, lv) => (dir > 0 ? k.l <= lv : k.h >= lv), fav = (k, lv) => (dir > 0 ? k.h >= lv : k.l <= lv);
+  let half = /^so-w:/.test(p.close_reason || ''), since = half ? +p.close_reason.split(':')[1] : 0;
+  for (const k of m.candles.filter((x) => x.t >= new Date(p.opened_at).getTime() - 60000)) {
+    if (!half) {
+      if (adv(k, +p.sl)) break; // Rev 2's own stop decides
+      if (fav(k, L(SCALE.w1))) { await scSplit(db, p, +p.notional / 2, L(SCALE.w1), 'scale-out +7%'); p.close_reason = 'so-w:' + k.t + ':' + lev; p.tp = L(SCALE.w2); p.sl = L(SCALE.wBack); await db.update('ap_positions', 'id=eq.' + p.id, { close_reason: p.close_reason, tp: p.tp, sl: p.sl }); half = true; since = k.t; }
+    } else if (k.t > since) {
+      if (adv(k, L(SCALE.wBack))) return { half, closed: true, why: 'scale-out back to +5%', pnl: await closePos(db, p, L(SCALE.wBack), 'scale-out back to +5%') };
+      if (fav(k, L(SCALE.w2))) return { half, closed: true, why: 'scale-out +10%', pnl: await closePos(db, p, L(SCALE.w2), 'scale-out +10%') };
+    }
+  }
+  if (half && Date.now() >= new Date(p.max_hold_until).getTime()) return { half, closed: true, why: 'time exit', pnl: await closePos(db, p, m.price, 'time exit') };
+  return { half, closed: false };
+}
+
 async function rev2Tick(db, rows, openPos, ctl, desk) {
   const sfx = ':' + desk, limit = desk === 'revm', out = [], lev0N = RM * REV2.lev0;
   for (const p of openPos) {
     const base = p.coin.split(':')[0], r = rows.find((x) => x.coin === base); if (!r) continue;
-    const x = await manageOpen(db, p, r.m).catch(() => null);
+    let x = null;
+    if (desk === 'rev2s') { const w = await rev2WinnerOut(db, p, r.m).catch(() => null); if (w && w.closed) { out.push(p.coin + ' closed ' + w.pnl.toFixed(2) + ' (' + w.why + ')'); continue; } if (w && w.half) continue; }
+    x = await manageOpen(db, p, r.m).catch(() => null);
     if (!x || !x.closed) continue;
     out.push(p.coin + ' closed ' + x.pnl.toFixed(2) + ' (' + x.why + ')');
     const lev = rev2Lev(p);
@@ -818,7 +837,7 @@ export async function tickAll(env) {
   const pendRes = await Promise.all(pend.map((pp) => { const r = rows.find((x) => x.coin === pp.coin.split(':')[0]); return r ? limitTick(db, pp, r.m).then((x) => { if (x !== 'waiting' && !/:rev/.test(pp.coin)) cnt.m--; return pp.coin + ' ' + x; }).catch(() => null) : null; }));
   for (const p of openAll) if (p.coin.endsWith(':algo') || p.coin.endsWith(':algo2') || p.coin.endsWith(':algo3') || p.coin.endsWith(':algo3b') || p.coin.endsWith(':algoq') || p.coin.endsWith(':algow') || p.coin.endsWith(':algox') || p.coin.endsWith(':algot')) openAlgo[p.coin] = p;
   const openRev = {}; for (const p of openAll) if (p.coin.endsWith(':rev')) openRev[p.coin] = p;
-  const openFlip = openAll.filter((p) => p.coin.endsWith(':flip')), openRevv = openAll.filter((p) => p.coin.endsWith(':revv')), openCap = openAll.filter((p) => p.coin.endsWith(':caprev')), openRevw = openAll.filter((p) => p.coin.endsWith(':revw')), openRevs = openAll.filter((p) => p.coin.endsWith(':revs')), openSpl = openAll.filter((p) => p.coin.endsWith(':spl')), openSpm = openAll.filter((p) => p.coin.endsWith(':spm'));
+  const openFlip = openAll.filter((p) => p.coin.endsWith(':flip')), openRevv = openAll.filter((p) => p.coin.endsWith(':revv')), openCap = openAll.filter((p) => p.coin.endsWith(':caprev')), openRevw = openAll.filter((p) => p.coin.endsWith(':revw')), openRev2s = openAll.filter((p) => p.coin.endsWith(':rev2s')), openRevs = openAll.filter((p) => p.coin.endsWith(':revs')), openSpl = openAll.filter((p) => p.coin.endsWith(':spl')), openSpm = openAll.filter((p) => p.coin.endsWith(':spm'));
   const openRev2 = openAll.filter((p) => p.coin.endsWith(':rev2')), openRevm = openAll.filter((p) => p.coin.endsWith(':revm'));
   const openR3 = Object.fromEntries(Object.keys(REV3.hours).map((k) => [k, openAll.filter((p) => p.coin.endsWith(':' + k))]));
   const openSet = new Set(open.map((p) => p.coin)), closedAlgo = {};
@@ -840,6 +859,7 @@ export async function tickAll(env) {
   const spmRes = await spotDeskTick(db, rows, openSpm, ctl, 'spm').catch((e) => ['spm error ' + String(e.message || e).slice(0, 60)]);
   const dfcRes = await dfcTick(db, ctl).catch((e) => ['dfc error ' + String(e.message || e).slice(0, 80)]);
   const revwRes = await revVariantTick(db, rows, openRevw, ctl, 'revw').catch((e) => ['revw error ' + String(e.message || e).slice(0, 60)]);
+  const rev2sRes = await rev2Tick(db, rows, openRev2s, ctl, 'rev2s').catch((e) => ['rev2s error ' + String(e.message || e).slice(0, 60)]);
   const revsRes = await revVariantTick(db, rows, openRevs, ctl, 'revs').catch((e) => ['revs error ' + String(e.message || e).slice(0, 60)]);
   const capRes = await revVariantTick(db, rows, openCap, ctl, 'caprev').catch((e) => ['caprev error ' + String(e.message || e).slice(0, 60)]);
   const r3Res = {}; for (const k of Object.keys(REV3.hours)) r3Res[k] = await rev3Tick(db, rows, openR3[k], ctl, k).catch((e) => [k + ' error ' + String(e.message || e).slice(0, 60)]);
@@ -861,7 +881,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */

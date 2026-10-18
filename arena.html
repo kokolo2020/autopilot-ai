@@ -55,7 +55,7 @@
   var DESKS = [
     ['rev', 'Neutral Rev', '5x, no stops', 0.00055], ['rev2', 'Rev 2', '4x to 7x, stop', 0.00055], ['revm', 'Rev 2 limit', 'limit entries', 0.00055],
     ['r3d', 'Rev 3 daily', '4x to 7x, $10 stop', 0.00055], ['r3l', 'Rev 3 low-leverage', '2x to 3x, $10 stop', 0.00055], ['caprev', 'Capitulation Rev', 'trades only after a falling day', 0.00055],
-    ['revs', 'Neutral Rev scale-out', 'half out at +7%, 5x', 0.00055], ['revw', 'Neutral Rev weekly', 'closes day 7', 0.00055], ['spl', 'Spot long-only', 'no perps', 0.001], ['spm', 'Spot margin Rev', 'no perps, borrowed shorts', 0.001],
+    ['rev2s', 'Rev 2 + winner exit', '4x to 7x, half out at +7%', 0.00055], ['revs', 'Neutral Rev scale-out', 'half out at +7%, 5x', 0.00055], ['revw', 'Neutral Rev weekly', 'closes day 7', 0.00055], ['spl', 'Spot long-only', 'no perps', 0.001], ['spm', 'Spot margin Rev', 'no perps, borrowed shorts', 0.001],
     ['carry', 'Funding carry', 'spot + short perp', 0], ['dfc', 'Dated-futures carry', 'spot + short future', 0]
   ];
   var $ = function (id) { return document.getElementById(id); };

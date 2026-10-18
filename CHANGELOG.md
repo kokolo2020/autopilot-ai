@@ -43,6 +43,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.38.1
+- New extra desk: Rev 2 + winner exit (half out at +7%, rest at +10% or back at +5%)
+
 ## v1.38
 - New extra desk: Neutral Rev scale-out (half out at +7%, +10%/+5% for the rest; losers -2.5% half out, -5% rebuy, -10% stop)
 

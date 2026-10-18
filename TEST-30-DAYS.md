@@ -42,3 +42,6 @@ Same 10 picks as Neutral Rev (5x, $100 margin per leg, 20:00 Bangkok close). All
 - Winners: at +7% sell half. The other half closes at +10%, or when it falls back to +5%, whichever comes first; if neither, it rides to 20:00.
 - Losers: at -2.5% sell half; at -5% buy that half back at the lower price; a -10% disaster stop closes everything left.
 - A leg closed early does not reopen that day. Compare it with plain Neutral Rev after 30 days: does scaling out beat doing nothing?
+
+## Extra: Rev 2 + winner exit (added 18 Oct)
+Rev 2 exactly as it is (4x, 10% price stop, reopens at 5x/6x/7x), plus the winner exit: at +7% of the $100 margin sell half; the rest closes at +10% or back at +5%. Compare with plain Rev 2.
