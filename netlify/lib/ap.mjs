@@ -620,8 +620,9 @@ export function revVariantLegs(rk, desk) {
 /* :spl Spot long-only: buy the 5 weakest top-50 coins ($200 each, no leverage) and sell at 20:00 Bangkok. :spm Spot margin Neutral Rev: 5 weakest bought, 5 strongest borrowed and sold, $100 each, same close. */
 export async function spotDeskTick(db, rows, openPos, ctl, desk) {
   const out = [], sfx = ':' + desk;
-  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
-  if (openPos.length) return out;
+  if (desk === 'revs') { const by = {}; for (const p of openPos) (by[p.coin] = by[p.coin] || []).push(p); for (const g of Object.values(by)) { const r = rows.find((x) => x.coin === g[0].coin.split(':')[0]); if (r) out.push(...await revsManage(db, g, r.m).catch((e) => [g[0].coin + ' error ' + String(e.message || e).slice(0, 60)])); } }
+  else for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
+  if (desk === 'revs' ? (await db.select('ap_positions', 'select=id&status=eq.open&coin=like.*:revs&limit=1').catch(() => [1])).length : openPos.length) return out;
   if (ctlBlocks(ctl, desk, '')) return out;
   const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&order=opened_at.desc&limit=1').catch(() => []))[0];
   if (!batchDue(last, Date.now(), 1)) return out;
@@ -697,9 +698,50 @@ export async function revVariantTick(db, rows, openPos, ctl, desk) {
   if (desk === 'caprev' && mkt24(rk) > CAP_GATE) { out.push('caprev waiting: market 24h ' + mkt24(rk).toFixed(2) + '% > ' + CAP_GATE + '%'); return out; }
   for (const [r, dir, notional] of revVariantLegs(rk, desk)) {
     const m = r.m, d = decFor(m.price) + 2;
-    await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * 0.5)).toFixed(d), sl: +(m.price * (1 - dir * 0.5)).toFixed(d), max_hold_until: new Date(nextClose(Date.now(), holdH / 24)).toISOString() });
+    await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * 0.5)).toFixed(d), sl: desk === 'revs' ? +(m.price * (1 + dir * SCALE.stop / SCALE.lev)).toFixed(d) : +(m.price * (1 - dir * 0.5)).toFixed(d), max_hold_until: new Date(nextClose(Date.now(), holdH / 24)).toISOString() });
     out.push(desk + ' opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + r.coin + ' $' + Math.round(notional));
   }
+  return out;
+}
+
+/* :revs Neutral Rev scale-out (paper). Same 10 picks as Neutral Rev (5x, $100 margin per leg, 20:00 Bangkok close). Every percentage below is of the $100 margin (so +7% = +$7 = a 1.4% price move at 5x).
+   Winners: at +7% sell half; the other half then closes at +10% or when it falls back to +5%, whichever comes first; if neither, it rides to 20:00.
+   Losers: at -2.5% sell half; at -5% buy that half back at the lower price; a disaster stop at -10% closes everything left. A leg closed early does not reopen that day. State lives in close_reason of the open row: so-w / so-l / so-l2 plus the stage time. */
+export const SCALE = { lev: LEV, w1: 0.07, w2: 0.10, wBack: 0.05, l1: -0.025, rebuy: -0.05, stop: -0.10 };
+const scLvl = (e, dir, f) => e * (1 + dir * f / SCALE.lev);
+const scSplit = async (db, p, half, exit, why) => { // close `half` of the position at `exit`, keep the rest open
+  const clone = await db.insert('ap_positions', { coin: p.coin, side: p.side, entry_price: p.entry_price, size: +p.size * half / +p.notional, notional: half, tp: p.tp, sl: p.sl, max_hold_until: p.max_hold_until, opened_at: p.opened_at, status: 'open' });
+  await closePos(db, clone, exit, why);
+  const n0 = +p.notional, z0 = +p.size, n1 = n0 - half, z1 = z0 * (n1 / n0);
+  await db.update('ap_positions', 'id=eq.' + p.id, { notional: n1, size: z1 });
+  p.notional = n1; p.size = z1;
+};
+export async function revsManage(db, grp, m) {
+  const out = [], main = grp.find((x) => !/^so-rb/.test(x.close_reason || '')), rb = grp.find((x) => /^so-rb/.test(x.close_reason || ''));
+  if (!main) return out;
+  const dir = main.side === 'LONG' ? 1 : -1, e = +main.entry_price, d = decFor(e) + 2, L = (f) => +scLvl(e, dir, f).toFixed(d), adv = (k, lv) => (dir > 0 ? k.l <= lv : k.h >= lv), fav = (k, lv) => (dir > 0 ? k.h >= lv : k.l <= lv);
+  let st = (main.close_reason || '').split(':')[0] || 'full', since = +(String(main.close_reason || '').split(':')[1] || 0) || new Date(main.opened_at).getTime();
+  const set = async (stage, ts, extra) => { main.close_reason = stage + ':' + ts; await db.update('ap_positions', 'id=eq.' + main.id, Object.assign({ close_reason: main.close_reason }, extra || {})); st = stage; since = ts; };
+  const shut = async (lv, why) => { for (const x of [main, rb].filter(Boolean)) { await closePos(db, x, lv, why); } out.push(main.coin + ' closed ' + why); return out; };
+  for (const k of m.candles.filter((x) => x.t > since - 60000 * 0 && x.t >= new Date(main.opened_at).getTime() - 60000)) {
+    if (k.t <= since && st !== 'full') continue;
+    if (st === 'full') {
+      if (adv(k, L(SCALE.l1))) { await scSplit(db, main, +main.notional / 2, L(SCALE.l1), 'scale-out -2.5%'); await set('so-l', k.t); out.push(main.coin + ' sold half at -2.5%'); continue; }
+      if (fav(k, L(SCALE.w1))) { await scSplit(db, main, +main.notional / 2, L(SCALE.w1), 'scale-out +7%'); await set('so-w', k.t, { tp: L(SCALE.w2), sl: L(SCALE.wBack) }); main.tp = L(SCALE.w2); main.sl = L(SCALE.wBack); out.push(main.coin + ' sold half at +7%'); continue; }
+    } else if (st === 'so-w') {
+      if (adv(k, L(SCALE.wBack))) return shut(L(SCALE.wBack), 'scale-out back to +5%');
+      if (fav(k, L(SCALE.w2))) return shut(L(SCALE.w2), 'scale-out +10%');
+    } else if (st === 'so-l') {
+      if (adv(k, L(SCALE.stop))) return shut(L(SCALE.stop), 'stop hit');
+      if (adv(k, L(SCALE.rebuy))) {
+        const half = +main.notional, px = L(SCALE.rebuy), nr = await db.insert('ap_positions', { coin: main.coin, side: main.side, entry_price: px, size: half / px, notional: half, tp: main.tp, sl: main.sl, max_hold_until: main.max_hold_until, status: 'open', close_reason: 'so-rb:' + k.t });
+        grp.push(nr); await set('so-l2', k.t); out.push(main.coin + ' bought half back at -5%'); continue;
+      }
+    } else if (st === 'so-l2') {
+      if (adv(k, L(SCALE.stop))) return shut(L(SCALE.stop), 'stop hit');
+    }
+  }
+  if (Date.now() >= new Date(main.max_hold_until).getTime()) { for (const x of grp) await closePos(db, x, m.price, 'time exit'); out.push(main.coin + ' time exit'); }
   return out;
 }
 
@@ -776,7 +818,7 @@ export async function tickAll(env) {
   const pendRes = await Promise.all(pend.map((pp) => { const r = rows.find((x) => x.coin === pp.coin.split(':')[0]); return r ? limitTick(db, pp, r.m).then((x) => { if (x !== 'waiting' && !/:rev/.test(pp.coin)) cnt.m--; return pp.coin + ' ' + x; }).catch(() => null) : null; }));
   for (const p of openAll) if (p.coin.endsWith(':algo') || p.coin.endsWith(':algo2') || p.coin.endsWith(':algo3') || p.coin.endsWith(':algo3b') || p.coin.endsWith(':algoq') || p.coin.endsWith(':algow') || p.coin.endsWith(':algox') || p.coin.endsWith(':algot')) openAlgo[p.coin] = p;
   const openRev = {}; for (const p of openAll) if (p.coin.endsWith(':rev')) openRev[p.coin] = p;
-  const openFlip = openAll.filter((p) => p.coin.endsWith(':flip')), openRevv = openAll.filter((p) => p.coin.endsWith(':revv')), openCap = openAll.filter((p) => p.coin.endsWith(':caprev')), openRevw = openAll.filter((p) => p.coin.endsWith(':revw')), openSpl = openAll.filter((p) => p.coin.endsWith(':spl')), openSpm = openAll.filter((p) => p.coin.endsWith(':spm'));
+  const openFlip = openAll.filter((p) => p.coin.endsWith(':flip')), openRevv = openAll.filter((p) => p.coin.endsWith(':revv')), openCap = openAll.filter((p) => p.coin.endsWith(':caprev')), openRevw = openAll.filter((p) => p.coin.endsWith(':revw')), openRevs = openAll.filter((p) => p.coin.endsWith(':revs')), openSpl = openAll.filter((p) => p.coin.endsWith(':spl')), openSpm = openAll.filter((p) => p.coin.endsWith(':spm'));
   const openRev2 = openAll.filter((p) => p.coin.endsWith(':rev2')), openRevm = openAll.filter((p) => p.coin.endsWith(':revm'));
   const openR3 = Object.fromEntries(Object.keys(REV3.hours).map((k) => [k, openAll.filter((p) => p.coin.endsWith(':' + k))]));
   const openSet = new Set(open.map((p) => p.coin)), closedAlgo = {};
@@ -798,6 +840,7 @@ export async function tickAll(env) {
   const spmRes = await spotDeskTick(db, rows, openSpm, ctl, 'spm').catch((e) => ['spm error ' + String(e.message || e).slice(0, 60)]);
   const dfcRes = await dfcTick(db, ctl).catch((e) => ['dfc error ' + String(e.message || e).slice(0, 80)]);
   const revwRes = await revVariantTick(db, rows, openRevw, ctl, 'revw').catch((e) => ['revw error ' + String(e.message || e).slice(0, 60)]);
+  const revsRes = await revVariantTick(db, rows, openRevs, ctl, 'revs').catch((e) => ['revs error ' + String(e.message || e).slice(0, 60)]);
   const capRes = await revVariantTick(db, rows, openCap, ctl, 'caprev').catch((e) => ['caprev error ' + String(e.message || e).slice(0, 60)]);
   const r3Res = {}; for (const k of Object.keys(REV3.hours)) r3Res[k] = await rev3Tick(db, rows, openR3[k], ctl, k).catch((e) => [k + ' error ' + String(e.message || e).slice(0, 60)]);
   const carryRes = RETIRED.has('carry') ? ['carry retired'] : await carryTick(db, ctl).catch((e) => ['carry error ' + String(e.message || e).slice(0, 80)]);
@@ -818,7 +861,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */

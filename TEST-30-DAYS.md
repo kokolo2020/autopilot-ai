@@ -36,3 +36,9 @@ All batches close at 20:00 Bangkok every day. Neutral Rev weekly closes at 20:00
 2. Spot margin Rev: 5 weakest bought and 5 strongest borrowed and sold, $100 each, 8pm close. The borrow interest is an ASSUMPTION (0.03% per day); the real OKX rate varies.
 3. Dated-futures carry: $100 spot + $100 short dated future per coin, up to 5 coins, held to expiry, entered only at 10%+ yearly basis after fees. Funding does not matter; the price gap closes at expiry. It may open nothing, and its trades last weeks, so a 7-day check says little about it.
 Prices for 1 and 2 come from the perpetual mid price, so the spot/perp gap is ignored.
+
+## Extra: Neutral Rev scale-out (added 18 Oct, runs outside the pass/fail test)
+Same 10 picks as Neutral Rev (5x, $100 margin per leg, 20:00 Bangkok close). All percentages are of the $100 margin (+7% = +$7 = a 1.4% price move at 5x).
+- Winners: at +7% sell half. The other half closes at +10%, or when it falls back to +5%, whichever comes first; if neither, it rides to 20:00.
+- Losers: at -2.5% sell half; at -5% buy that half back at the lower price; a -10% disaster stop closes everything left.
+- A leg closed early does not reopen that day. Compare it with plain Neutral Rev after 30 days: does scaling out beat doing nothing?

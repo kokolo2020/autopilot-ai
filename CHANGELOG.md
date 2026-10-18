@@ -42,6 +42,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.38
+- New extra desk: Neutral Rev scale-out (half out at +7%, +10%/+5% for the rest; losers -2.5% half out, -5% rebuy, -10% stop)
+
 ## v1.37.8
 - Saga: coins green when winning, red when losing
 

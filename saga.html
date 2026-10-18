@@ -48,7 +48,7 @@
   var DEMO = LEGS.map(function (l) { return Object.assign({}, l, { sl: l.e * (1 - (l.side === 'LONG' ? 1 : -1) * 0.025), stopped: false, closed: false, real: 0 }); }); LEGS = DEMO;
   var live = false;
   function get(t, q) { return fetch(URL_ + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
-  var DK = [['rev2', 'Rev 2 (4x, stop, +50% take profit)', true], ['r3d', 'Rev 3 daily (4x, $10 stop)', true], ['r3l', 'Rev 3 low-lev (2x, $10 stop)', true], ['rev', 'Neutral Rev (no stop)', false]], desk = 'rev2';
+  var DK = [['rev2', 'Rev 2 (4x, stop, +50% take profit)', true], ['r3d', 'Rev 3 daily (4x, $10 stop)', true], ['revs', 'Scale-out (5x, -10% stop)', true], ['r3l', 'Rev 3 low-lev (2x, $10 stop)', true], ['rev', 'Neutral Rev (no stop)', false]], desk = 'rev2';
   try { var sv = localStorage.getItem('ap-saga'); if (sv && DK.some(function (d) { return d[0] === sv; })) desk = sv; } catch (e) {}
   function chips() { var c = document.getElementById('chips'); c.innerHTML = DK.map(function (d) { return '<button type="button" data-k="' + d[0] + '" style="font:600 13px system-ui;border:1px solid ' + (d[0] === desk ? 'var(--acc)' : 'var(--line)') + ';background:var(--card);color:var(--text);border-radius:999px;padding:6px 12px;cursor:pointer">' + d[1] + '</button>'; }).join(''); Array.prototype.forEach.call(c.children, function (b) { b.onclick = function () { desk = b.getAttribute('data-k'); try { localStorage.setItem('ap-saga', desk); } catch (e) {} chips(); live = false; LEGS = DEMO; t0 = performance.now(); off = 0; setText(); load(); }; }); }
   var hasStop = function () { return DK.filter(function (d) { return d[0] === desk; })[0][2]; };

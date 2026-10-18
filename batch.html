@@ -47,7 +47,7 @@
   var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
   var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
   var RM = 100;
-  var DESKS = [['rev', 'Neutral Rev', 0.00055, '5x, no stop'], ['rev2', 'Rev 2', 0.00055, '4x to 7x with stop'], ['revm', 'Rev 2 limit', 0.00055, 'limit entries'], ['r3d', 'Rev 3 daily', 0.00055, '4x to 7x, $10 stop'], ['r3l', 'Rev 3 low-lev', 0.00055, '2x to 3x, $10 stop'], ['caprev', 'Capitulation Rev', 0.00055, 'only after a falling day'], ['revw', 'Neutral Rev weekly', 0.00055, 'closes day 7'], ['spl', 'Spot long-only', 0.001, 'no perps'], ['spm', 'Spot margin Rev', 0.001, 'no perps']];
+  var DESKS = [['rev', 'Neutral Rev', 0.00055, '5x, no stop'], ['rev2', 'Rev 2', 0.00055, '4x to 7x with stop'], ['revm', 'Rev 2 limit', 0.00055, 'limit entries'], ['r3d', 'Rev 3 daily', 0.00055, '4x to 7x, $10 stop'], ['r3l', 'Rev 3 low-lev', 0.00055, '2x to 3x, $10 stop'], ['revs', 'Scale-out', 0.00055, '5x, half out at +7% / -2.5%'], ['caprev', 'Capitulation Rev', 0.00055, 'only after a falling day'], ['revw', 'Neutral Rev weekly', 0.00055, 'closes day 7'], ['spl', 'Spot long-only', 0.001, 'no perps'], ['spm', 'Spot margin Rev', 0.001, 'no perps']];
   var $ = function (id) { return document.getElementById(id); };
   var money = function (n) { return (n < 0 ? '-' : n > 0 ? '+' : '') + '$' + Math.abs(n).toFixed(2); };
   var cls = function (n) { return n > 0.005 ? 'up' : n < -0.005 ? 'down' : 'mut'; };
