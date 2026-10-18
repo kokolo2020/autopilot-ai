@@ -30,6 +30,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.35
+- Non-perp test desks: spot long-only, spot margin Rev, dated-futures carry; fix Rev 2 limit maker fee after reset
+
 ## v1.34
 - All batches close at 20:00 Bangkok daily (weekly desk day 7)
 

@@ -30,3 +30,9 @@ Ideas for lower losses in a bear market, all paper, all judged on the same four 
 
 ## Closing time (18 Oct 2026)
 All batches close at 20:00 Bangkok every day. Neutral Rev weekly closes at 20:00 on day 7. Batch 1 of the reset (opened 18 Oct 12:05) closes at 20:00 the same day and counts as a partial day.
+
+## Non-perpetual extras (added 18 Oct 2026, not part of pass/fail; each has its own $1,000 bank)
+1. Spot long-only: buys the 5 weakest coins ($200 each, no leverage), sells at 8pm daily. Taker fee 0.10% per side. This is the control that shows how much of Neutral Rev's profit comes from the short leg.
+2. Spot margin Rev: 5 weakest bought and 5 strongest borrowed and sold, $100 each, 8pm close. The borrow interest is an ASSUMPTION (0.03% per day); the real OKX rate varies.
+3. Dated-futures carry: $100 spot + $100 short dated future per coin, up to 5 coins, held to expiry, entered only at 10%+ yearly basis after fees. Funding does not matter; the price gap closes at expiry. It may open nothing, and its trades last weeks, so a 7-day check says little about it.
+Prices for 1 and 2 come from the perpetual mid price, so the spot/perp gap is ignored.

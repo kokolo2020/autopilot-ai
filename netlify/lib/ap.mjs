@@ -206,10 +206,13 @@ export async function rev3Funding(p, endMs = Date.now()) {
   }
   return sum;
 }
+/* Non-perpetual paper desks. Spot: taker 0.10% per side, no leverage, no funding. Spot margin short: the coin is borrowed, so the short leg also pays borrow interest (ASSUMED 0.03% per day; OKX's real rate varies by coin and day). Prices come from the perpetual mid, so the spot/perp basis is ignored. */
+export const SPOT = { fee: 0.001, borrowPerDay: 0.0003, longLeg: 200, pairLeg: 100 };
+export const spotFees = (p, endMs) => +p.notional * SPOT.fee * 2 + (/:spm$/.test(p.coin) && p.side === 'SHORT' ? +p.notional * SPOT.borrowPerDay * Math.max(0, (endMs - new Date(p.opened_at).getTime()) / 864e5) : 0);
 const closePos = async (db, p, exit, why) => {
   const dir = p.side === 'LONG' ? 1 : -1;
   const funding = /:r3[dwmyl]$/.test(p.coin) ? await rev3Funding(p).catch(() => 0) : 0;
-  const fees = /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - START * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + FEE) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
+  const fees = /:sp[lm]$/.test(p.coin) ? spotFees(p, Date.now()) : /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - RM * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + FEE) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
   await db.update('ap_positions', 'id=eq.' + p.id, { status: 'closed', exit_price: exit, closed_at: new Date().toISOString(), pnl, fees, close_reason: funding ? why + ' | funding ' + (funding >= 0 ? '+' : '') + funding.toFixed(2) : why });
   return pnl;
 };
@@ -614,6 +617,74 @@ export function revVariantLegs(rk, desk) {
   const sizes = desk === 'revv' ? riskSizes(legs) : legs.map(() => RM * LEV);
   return legs.map(([r, dir], i) => [r, dir, sizes[i]]);
 }
+/* :spl Spot long-only: buy the 5 weakest top-50 coins ($200 each, no leverage) and sell at 20:00 Bangkok. :spm Spot margin Neutral Rev: 5 weakest bought, 5 strongest borrowed and sold, $100 each, same close. */
+export async function spotDeskTick(db, rows, openPos, ctl, desk) {
+  const out = [], sfx = ':' + desk;
+  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
+  if (openPos.length) return out;
+  if (ctlBlocks(ctl, desk, '')) return out;
+  const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&order=opened_at.desc&limit=1').catch(() => []))[0];
+  if (!batchDue(last, Date.now(), 1)) return out;
+  const rk = rows.filter((r) => revOk(r) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
+  if (rk.length < REV.K * 2 + 4) return out;
+  const legs = rk.slice(0, REV.K).map((r) => [r, 1]).concat(desk === 'spm' ? rk.slice(-REV.K).map((r) => [r, -1]) : []);
+  const notional = desk === 'spm' ? SPOT.pairLeg : SPOT.longLeg, deadline = new Date(nextClose(Date.now(), 1)).toISOString();
+  for (const [r, dir] of legs) {
+    const m = r.m, d = decFor(m.price) + 2;
+    await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (dir > 0 ? 100 : 0.01)).toFixed(d), sl: +(m.price * (dir > 0 ? 0.01 : 100)).toFixed(d), max_hold_until: deadline });
+    out.push(desk + ' opened ' + (dir > 0 ? 'BUY ' : 'BORROW-SELL ') + r.coin + ' $' + notional);
+  }
+  return out;
+}
+
+/* Dated-futures carry (paper): long spot + short a dated USDT future (cash carry), $100 per leg, 5 slots, held to expiry. Rows live in ap_carry with coin = the futures instId (it contains '-'), last_funding_ts = expiry in ms, entry_rate = annualised basis at entry.
+   Enter when the annualised basis, after round-trip fees, is at least DFC.minAnn. At expiry the future settles at spot, so the basis is locked in; the mark before that is spot_bid vs future ask. */
+export const DFC = { slots: 5, leg: 100, spotFee: 0.001, futFee: FEE, settleFee: 0.0002, minAnn: 0.10, scanEveryMin: 30 };
+export const dfcEntryFees = () => DFC.leg * (DFC.spotFee + DFC.futFee), dfcExitFees = () => DFC.leg * (DFC.spotFee + DFC.settleFee);
+let dfcScanAt = 0;
+export async function dfcTick(db, ctl, now = Date.now()) {
+  const out = [];
+  const open = await db.select('ap_carry', 'select=*&status=eq.open&coin=like.*-*');
+  const q = (t) => ({ last: +t.last, bid: +t.bidPx > 0 ? +t.bidPx : +t.last, ask: +t.askPx > 0 ? +t.askPx : +t.last });
+  const spotT = {}, futT = {};
+  for (const t of await okx('/api/v5/market/tickers?instType=SPOT')) spotT[t.instId] = q(t);
+  for (const t of await okx('/api/v5/market/tickers?instType=FUTURES')) futT[t.instId] = q(t);
+  for (const row of open) {
+    const base = row.coin.split('-')[0], sp = spotT[base + '-USDT'], fu = futT[row.coin], expired = now >= +row.last_funding_ts;
+    if (!sp || !(sp.bid > 0)) continue;
+    const futPx = expired ? sp.bid : fu && fu.ask > 0 ? fu.ask : null; if (futPx == null) continue; // at expiry the future settles at spot
+    const priceNet = (+row.spot_qty) * (sp.bid - +row.spot_entry) + (+row.perp_qty) * (+row.perp_entry - futPx), fees = +row.fees + (expired ? dfcExitFees() : 0);
+    await db.update('ap_carry', 'id=eq.' + row.id, Object.assign({ spot_last: sp.bid, perp_last: futPx, price_pnl: priceNet, fees, net_pnl: priceNet - fees, updated_at: new Date(now).toISOString() }, expired ? { status: 'closed', closed_at: new Date(now).toISOString(), close_reason: 'expiry' } : {}));
+    if (expired) out.push(row.coin + ' expired, net ' + (priceNet - fees).toFixed(2));
+  }
+  const free = DFC.slots - open.length;
+  if (free <= 0 || ctlBlocks(ctl, 'dfc', '') || now - dfcScanAt < DFC.scanEveryMin * 60000) return out;
+  dfcScanAt = now;
+  const held = new Set(open.map((r) => r.coin.split('-')[0]));
+  const cands = [];
+  for (const c of TOP.slice(0, 12)) {
+    if (held.has(c)) continue;
+    const list = await okx('/api/v5/public/instruments?instType=FUTURES&uly=' + c + '-USDT').catch(() => []);
+    for (const i of list || []) if (i.state === 'live' && +i.expTime - now > 5 * 864e5) cands.push({ c, id: i.instId, exp: +i.expTime });
+  }
+  const best = [];
+  for (const x of cands) {
+    const S = spotT[x.c + '-USDT'], F = futT[x.id]; if (!S || !F || !(S.ask > 0) || !(F.bid > 0)) continue;
+    const days = (x.exp - now) / 864e5, gross = (F.bid - S.ask) / S.ask, net = gross - (dfcEntryFees() + dfcExitFees()) / DFC.leg, ann = net * 365 / days;
+    if (ann >= DFC.minAnn) best.push(Object.assign(x, { S, F, ann, days }));
+  }
+  best.sort((a, b) => b.ann - a.ann);
+  const used = new Set();
+  for (const x of best) {
+    if (used.size >= free) break; if (used.has(x.c)) continue; used.add(x.c);
+    const sp = x.S.ask, pp = x.F.bid, drift = (DFC.leg / sp) * (x.S.bid - sp) + (DFC.leg / pp) * (pp - x.F.ask);
+    await db.insert('ap_carry', { coin: x.id, status: 'open', opened_at: new Date(now).toISOString(), leg_usd: DFC.leg, spot_entry: sp, perp_entry: pp, spot_qty: DFC.leg / sp, perp_qty: DFC.leg / pp, entry_rate: x.ann, funding_total: 0, last_funding_ts: x.exp, spot_last: x.S.bid, perp_last: x.F.ask, price_pnl: drift, fees: dfcEntryFees(), net_pnl: drift - dfcEntryFees(), updated_at: new Date(now).toISOString() });
+    out.push('dfc opened ' + x.id + ' annualised ' + (x.ann * 100).toFixed(1) + '% over ' + x.days.toFixed(0) + 'd');
+  }
+  if (!best.length) out.push('dfc: no dated future with annualised basis >= ' + (DFC.minAnn * 100) + '% after fees (' + cands.length + ' checked)');
+  return out;
+}
+
 export async function revVariantTick(db, rows, openPos, ctl, desk) {
   const out = [], sfx = ':' + desk, holdH = desk === 'revw' ? 168 : REV.holdH;
   for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
@@ -650,7 +721,7 @@ export const carryPriceNet = (row, spot, perp) => (+row.spot_qty) * (spot - +row
 let carryScanAt = 0;
 export async function carryTick(db, ctl, now = Date.now()) {
   const out = [];
-  const open = await db.select('ap_carry', 'select=*&status=eq.open');
+  const open = await db.select('ap_carry', 'select=*&status=eq.open&coin=not.like.*-*');
   const spotT = {}, swapT = {};
   const quote = (t) => ({ last: +t.last, bid: +t.bidPx > 0 ? +t.bidPx : +t.last, ask: +t.askPx > 0 ? +t.askPx : +t.last });
   for (const t of await okx('/api/v5/market/tickers?instType=SPOT')) spotT[t.instId] = quote(t);
@@ -705,7 +776,7 @@ export async function tickAll(env) {
   const pendRes = await Promise.all(pend.map((pp) => { const r = rows.find((x) => x.coin === pp.coin.split(':')[0]); return r ? limitTick(db, pp, r.m).then((x) => { if (x !== 'waiting' && !/:rev/.test(pp.coin)) cnt.m--; return pp.coin + ' ' + x; }).catch(() => null) : null; }));
   for (const p of openAll) if (p.coin.endsWith(':algo') || p.coin.endsWith(':algo2') || p.coin.endsWith(':algo3') || p.coin.endsWith(':algo3b') || p.coin.endsWith(':algoq') || p.coin.endsWith(':algow') || p.coin.endsWith(':algox') || p.coin.endsWith(':algot')) openAlgo[p.coin] = p;
   const openRev = {}; for (const p of openAll) if (p.coin.endsWith(':rev')) openRev[p.coin] = p;
-  const openFlip = openAll.filter((p) => p.coin.endsWith(':flip')), openRevv = openAll.filter((p) => p.coin.endsWith(':revv')), openCap = openAll.filter((p) => p.coin.endsWith(':caprev')), openRevw = openAll.filter((p) => p.coin.endsWith(':revw'));
+  const openFlip = openAll.filter((p) => p.coin.endsWith(':flip')), openRevv = openAll.filter((p) => p.coin.endsWith(':revv')), openCap = openAll.filter((p) => p.coin.endsWith(':caprev')), openRevw = openAll.filter((p) => p.coin.endsWith(':revw')), openSpl = openAll.filter((p) => p.coin.endsWith(':spl')), openSpm = openAll.filter((p) => p.coin.endsWith(':spm'));
   const openRev2 = openAll.filter((p) => p.coin.endsWith(':rev2')), openRevm = openAll.filter((p) => p.coin.endsWith(':revm'));
   const openR3 = Object.fromEntries(Object.keys(REV3.hours).map((k) => [k, openAll.filter((p) => p.coin.endsWith(':' + k))]));
   const openSet = new Set(open.map((p) => p.coin)), closedAlgo = {};
@@ -723,6 +794,9 @@ export async function tickAll(env) {
   const revmRes = await rev2Tick(db, rows, openRevm, ctl, 'revm').catch((e) => ['revm error ' + String(e.message || e).slice(0, 60)]);
   const flipRes = await revVariantTick(db, rows, openFlip, ctl, 'flip').catch((e) => ['flip error ' + String(e.message || e).slice(0, 60)]);
   const revvRes = await revVariantTick(db, rows, openRevv, ctl, 'revv').catch((e) => ['revv error ' + String(e.message || e).slice(0, 60)]);
+  const splRes = await spotDeskTick(db, rows, openSpl, ctl, 'spl').catch((e) => ['spl error ' + String(e.message || e).slice(0, 60)]);
+  const spmRes = await spotDeskTick(db, rows, openSpm, ctl, 'spm').catch((e) => ['spm error ' + String(e.message || e).slice(0, 60)]);
+  const dfcRes = await dfcTick(db, ctl).catch((e) => ['dfc error ' + String(e.message || e).slice(0, 80)]);
   const revwRes = await revVariantTick(db, rows, openRevw, ctl, 'revw').catch((e) => ['revw error ' + String(e.message || e).slice(0, 60)]);
   const capRes = await revVariantTick(db, rows, openCap, ctl, 'caprev').catch((e) => ['caprev error ' + String(e.message || e).slice(0, 60)]);
   const r3Res = {}; for (const k of Object.keys(REV3.hours)) r3Res[k] = await rev3Tick(db, rows, openR3[k], ctl, k).catch((e) => [k + ' error ' + String(e.message || e).slice(0, 60)]);
@@ -744,7 +818,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */
