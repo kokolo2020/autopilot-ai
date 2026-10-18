@@ -1,5 +1,7 @@
 # 30-day test, $1,000 bank per strategy (restarted 18 Oct 2026)
 
+> **19 Oct 2026 (v1.44): the daily close moved from 20:00 to 07:00 Bangkok (00:00 UTC) at Koko's request.** Open daily legs were closed at 07:00 on 19 Oct and a new batch opened right after. Under the rule above this restarts the 30-day count: day 1 is the 19 Oct 07:00 batch. The weekly desk and My picks are unchanged.
+
 Rules fixed in advance so we can't move the goalposts. The first test (old $250-per-leg scale) was reset; its history is archived in `*_archive_1018`.
 
 - Strategies: Neutral Rev, Rev 2, Rev 2 limit, Rev 3 daily. Each has its own $1,000 bank.

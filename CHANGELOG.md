@@ -55,6 +55,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.44.1
+- Pages now show the 7am Bangkok close (arena countdown, batch tracker, saga, research labels); 30-day test note
+
 ## v1.44
 - Daily close moved from 8pm to 7am Bangkok for all daily desks; open legs close at 7am today and the next batch opens right after (weekly desk and My picks unchanged)
 

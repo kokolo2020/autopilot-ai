@@ -26,8 +26,8 @@
 (function () {
   var cv = document.getElementById('c'), x = cv.getContext('2d'), W = 1000, H = 600;
   var FEE = 0.00055, NOTIONAL = 500, SCENES = {
-    bear: { dir: -1, coin: 'BNB', entry: 720.1, now: 721.4, dec: 1, fine: 'The numbers are real: short BNB at 720.1, price now 721.4, $500 position (5x on $100). The price moved against the short by +0.18%: about -$0.90 before fees and -$1.45 after both fees, if it closed right now. The batch does not close until 20:00 Bangkok, so the story is not over.' },
-    bull: { dir: 1, coin: 'FIL', entry: 1.0543, now: 1.0483, dec: 4, fine: 'The numbers are real: long FIL at 1.0543, price now 1.0483, $500 position (5x on $100). The price moved against the long by -0.57%: about -$2.85 before fees and -$3.40 after both fees, if it closed right now. The batch does not close until 20:00 Bangkok, so the story is not over.' } };
+    bear: { dir: -1, coin: 'BNB', entry: 720.1, now: 721.4, dec: 1, fine: 'The numbers are real: short BNB at 720.1, price now 721.4, $500 position (5x on $100). The price moved against the short by +0.18%: about -$0.90 before fees and -$1.45 after both fees, if it closed right now. The batch does not close until 07:00 Bangkok, so the story is not over.' },
+    bull: { dir: 1, coin: 'FIL', entry: 1.0543, now: 1.0483, dec: 4, fine: 'The numbers are real: long FIL at 1.0543, price now 1.0483, $500 position (5x on $100). The price moved against the long by -0.57%: about -$2.85 before fees and -$3.40 after both fees, if it closed right now. The batch does not close until 07:00 Bangkok, so the story is not over.' } };
   var SC = SCENES.bear, ENTRY = SC.entry, NOW = SC.now, gross = 0, net = 0;
   function setScene(k) { SC = SCENES[k]; ENTRY = SC.entry; NOW = SC.now; gross = SC.dir * NOTIONAL * (NOW - ENTRY) / ENTRY; net = gross - NOTIONAL * FEE * 2; document.getElementById('fine').textContent = SC.fine; document.getElementById('s1').style.borderColor = k === 'bear' ? 'var(--acc)' : 'var(--line)'; document.getElementById('s2').style.borderColor = k === 'bull' ? 'var(--acc)' : 'var(--line)'; t0 = performance.now(); off = 0; if (paused) { paused = false; document.getElementById('sp').textContent = 'Pause'; } requestAnimationFrame(frame); }
   var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -89,7 +89,7 @@
     x.font = '800 54px ui-monospace,monospace'; x.fillStyle = n < -0.005 ? '#ff6b6b' : txt; x.fillText(money(n), 40, 560); x.font = '600 18px system-ui'; x.fillStyle = mut; x.fillText(t > 9.5 ? 'after both fees' : (up ? 'bear’s P&L' : 'bull’s P&L'), 290, 560);
     /* fee gremlin */
     if (t > 9 && t < 14.5) { var gx = 560 + (1 - seg(t, 9, 10)) * 500, gy = 520 + Math.sin(t * 8) * 4; x.fillStyle = '#7e57c2'; x.beginPath(); x.arc(gx, gy, 26, 0, 7); x.fill(); x.fillStyle = '#fff'; x.beginPath(); x.arc(gx - 9, gy - 6, 6, 0, 7); x.arc(gx + 9, gy - 6, 6, 0, 7); x.fill(); x.fillStyle = '#111'; x.beginPath(); x.arc(gx - 9, gy - 5, 3, 0, 7); x.arc(gx + 9, gy - 5, 3, 0, 7); x.fill(); x.fillRect(gx - 12, gy + 6, 24, 5); x.fillStyle = txt; x.font = '700 18px system-ui'; x.fillText('fees: 0.055% each way', gx + 36, gy + 6); }
-    if (t > 12 && t < 15.8) { bubbleText(up ? '6 hours to the 8pm bell...' : 'The dip has no bottom...', 330, 140, 420); }
+    if (t > 12 && t < 15.8) { bubbleText(up ? '6 hours to the 7am bell...' : 'The dip has no bottom...', 330, 140, 420); }
     if (reduce) { /* reduced motion: hold the final scene */ }
     if (!paused && !reduce) requestAnimationFrame(frame);
   }

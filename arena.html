@@ -33,15 +33,15 @@
 <body>
 <div class="wrap">
   <h1>AUTOPILOT TIDE ROOM <small><span id="ver"></span> · paper money · <a href="/batch.html">Batch tracker</a> · <a href="/story.html">Stories</a> · <a href="/saga.html">Saga</a> · <a href="/research.html">Research</a> · <a href="/horizons.html">Horizons</a></small></h1>
-  <div class="sub">Every strategy is a tank. The dashed line is the $1,000 it started with. Water above the line means the desk is ahead; below means behind. Each bubble is one open trade. Everything closes at 20:00 Bangkok.</div>
+  <div class="sub">Every strategy is a tank. The dashed line is the $1,000 it started with. Water above the line means the desk is ahead; below means behind. Each bubble is one open trade. Everything closes at 07:00 Bangkok.</div>
   <div class="top">
-    <canvas id="ring" width="192" height="192" aria-label="Countdown to the 8pm Bangkok close"></canvas>
-    <div><div class="lbl">Next close</div><div class="big" id="cd">--</div><div class="mut" id="cdsub">20:00 Bangkok</div></div>
+    <canvas id="ring" width="192" height="192" aria-label="Countdown to the 7am Bangkok close"></canvas>
+    <div><div class="lbl">Next close</div><div class="big" id="cd">--</div><div class="mut" id="cdsub">07:00 Bangkok</div></div>
     <div><div class="lbl">All desks together</div><div class="big" id="tot">--</div><div class="mut" id="totsub"></div></div>
     <div id="best"></div>
   </div>
   <div class="bell" id="bell"></div>
-  <div class="rp"><b id="rpl">Live</b><input type="range" id="rps" min="0" max="0" value="0" aria-label="Replay day"><button id="rpb" type="button">Back to live</button><button id="bellb" type="button">Preview the 8pm bell</button></div>
+  <div class="rp"><b id="rpl">Live</b><input type="range" id="rps" min="0" max="0" value="0" aria-label="Replay day"><button id="rpb" type="button">Back to live</button><button id="bellb" type="button">Preview the 7am bell</button></div>
   <div class="rk" id="rk"></div>
   <div class="grid" id="grid"></div>
   <div class="legend">Green bubble = trade in profit, red = in loss, bigger = larger move. Solid ring = long (or bought), dashed ring = short (or borrowed). Waves are for looks; the numbers are real paper P&amp;L after fees. Hover a bubble to see the coin.</div>
@@ -51,7 +51,7 @@
 (function () {
   var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
   var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
-  var BANK = 1000, CLOSE_H = 13;
+  var BANK = 1000, CLOSE_H = 0;
   var DESKS = [
     ['rev', 'Neutral Rev', '5x, no stops', 0.00055], ['rev2', 'Rev 2', '4x to 7x, stop', 0.00055], ['revm', 'Rev 2 limit', 'limit in and out', 0.0002],
     ['r3d', 'Rev 3 daily', '4x to 7x, $10 stop', 0.00055], ['r3l', 'Rev 3 low-leverage', '2x to 3x, $10 stop', 0.00055], ['caprev', 'Capitulation Rev', 'trades only after a falling day', 0.00055],
@@ -94,7 +94,7 @@
     }).catch(function (e) { rawErr = e.message; $('totsub').textContent = 'Could not load data: ' + e.message; });
   }
 
-  /* replay: water level at the end of each 20:00 Bangkok day, from realised P&L only (open trades are not shown in the past) */
+  /* replay: water level at the end of each 07:00 Bangkok day, from realised P&L only (open trades are not shown in the past) */
   var RESET_AT = '2026-10-18T05:00:00Z', view = null;
   function days() {
     var t0 = Date.parse(RESET_AT), now = Date.now(), b = [], t = nextCloseAt(t0);
@@ -103,7 +103,7 @@
   }
   function nextCloseAt(ms) { var d = new Date(ms), t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), CLOSE_H); if (t <= ms) t += 86400000; return t; }
   function setView(v, keep) {
-    view = v; var live = v >= S.bounds.length; $('rpl').textContent = live ? 'Live' : 'End of day ' + (v + 1) + ' (20:00 ' + new Date(S.bounds[v] + 7 * 3600000).toISOString().slice(5, 10) + ')';
+    view = v; var live = v >= S.bounds.length; $('rpl').textContent = live ? 'Live' : 'End of day ' + (v + 1) + ' (07:00 ' + new Date(S.bounds[v] + 7 * 3600000).toISOString().slice(5, 10) + ')';
     if (live || !S.pos) S.desks = S.live || []; else S.desks = DESKS.map(function (d) {
       var real = 0, legs = []; S.pos.forEach(function (p) { if (p.status === 'closed' && p.coin.slice(-(d[0].length + 1)) === ':' + d[0] && p.closed_at && Date.parse(p.closed_at) <= S.bounds[v] + 30 * 60000) real += +p.pnl || 0; });
       return { key: d[0], name: d[1], sub: d[2], real: real, open: 0, eq: BANK + real, legs: legs };
@@ -182,7 +182,7 @@
     x.restore(); x.strokeStyle = line; x.lineWidth = 2; x.strokeRect(0, 0, W, H);
   }
 
-  /* the 8pm ring: a sun that sets as the close approaches */
+  /* the 7am ring: a sun that sets as the close approaches */
   function nextClose(now) { var d = new Date(now), t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), CLOSE_H); if (t <= now) t += 86400000; return t; }
   function ring(t) {
     var cv = $('ring'), x = cv.getContext('2d'), W = cv.width, now = Date.now(), nc = nextClose(now), left = nc - now, frac = 1 - left / 86400000;
@@ -191,7 +191,7 @@
     x.strokeStyle = acc; x.lineCap = 'round'; x.beginPath(); x.arc(cx, cy, 78, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); x.stroke();
     var a = -Math.PI / 2 + frac * Math.PI * 2, sx = cx + Math.cos(a) * 78, sy = cy + Math.sin(a) * 78, pulse = reduce ? 0 : Math.sin(t * 3) * 2;
     x.fillStyle = '#f5a623'; x.beginPath(); x.arc(sx, sy, 11 + pulse, 0, 7); x.fill();
-    x.fillStyle = txt; x.font = '700 30px ui-monospace,monospace'; x.textAlign = 'center'; x.fillText('8pm', cx, cy + 10); x.textAlign = 'left';
+    x.fillStyle = txt; x.font = '700 30px ui-monospace,monospace'; x.textAlign = 'center'; x.fillText('7am', cx, cy + 10); x.textAlign = 'left';
     var h = Math.floor(left / 3600000), m = Math.floor(left % 3600000 / 60000); $('cd').textContent = h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
   }
   $('rps').addEventListener('input', function () { setView(+this.value); });
