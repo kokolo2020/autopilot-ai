@@ -24,6 +24,9 @@
   .up { color:var(--up); } .down { color:var(--down); } .mut { color:var(--mut); }
   .tip { position:fixed; pointer-events:none; background:var(--text); color:var(--bg); padding:4px 8px; border-radius:8px; font:600 12px var(--mono); display:none; z-index:5; }
   .rk { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 14px; } .rk span { background:var(--card); border:1px solid var(--line); border-radius:999px; padding:3px 10px; font:600 12px var(--mono); }
+  .bell { display:none; background:linear-gradient(90deg,#f5a62333,#6aa9ff22); border:1px solid #f5a623; border-radius:14px; padding:10px 14px; margin-bottom:12px; font-weight:700; }
+  .rp { display:flex; gap:10px; align-items:center; flex-wrap:wrap; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:8px 14px; margin-bottom:14px; }
+  .rp input[type=range] { flex:1; min-width:160px; accent-color:var(--acc); } .rp button { font:600 12px system-ui; border:1px solid var(--line); background:transparent; color:var(--text); border-radius:999px; padding:4px 12px; cursor:pointer; }
   .legend { color:var(--mut); font-size:12px; margin-top:14px; line-height:1.6; }
 </style>
 </head>
@@ -37,6 +40,8 @@
     <div><div class="lbl">All desks together</div><div class="big" id="tot">--</div><div class="mut" id="totsub"></div></div>
     <div id="best"></div>
   </div>
+  <div class="bell" id="bell"></div>
+  <div class="rp"><b id="rpl">Live</b><input type="range" id="rps" min="0" max="0" value="0" aria-label="Replay day"><button id="rpb" type="button">Back to live</button><button id="bellb" type="button">Preview the 8pm bell</button></div>
   <div class="rk" id="rk"></div>
   <div class="grid" id="grid"></div>
   <div class="legend">Green bubble = trade in profit, red = in loss, bigger = larger move. Solid ring = long (or bought), dashed ring = short (or borrowed). Waves are for looks; the numbers are real paper P&amp;L after fees. Hover a bubble to see the coin.</div>
@@ -83,12 +88,39 @@
     });
   }
   function load() {
-    Promise.all([get('ap_positions', 'select=coin,side,status,notional,entry_price,pnl&order=opened_at.desc&limit=5000'), get('ap_carry', 'select=coin,status,net_pnl&limit=500').catch(function () { return []; }), get('ap_samples', 'select=coin,price,ts&order=ts.desc&limit=400')]).then(function (r) {
+    Promise.all([get('ap_positions', 'select=coin,side,status,notional,entry_price,pnl,closed_at&order=opened_at.desc&limit=5000'), get('ap_carry', 'select=coin,status,net_pnl&limit=500').catch(function () { return []; }), get('ap_samples', 'select=coin,price,ts&order=ts.desc&limit=400')]).then(function (r) {
       var px = {}; r[2].forEach(function (x) { if (px[x.coin] == null) px[x.coin] = +x.price; });
-      S.desks = build(r[0], r[1], px); rawErr = null; paint();
+      S.pos = r[0]; var nc = r[0].filter(function (p) { return p.status === 'closed'; }).length; if (S.nClosed != null && nc > S.nClosed) ring8(r[0]); S.nClosed = nc; S.live = build(r[0], r[1], px); S.desks = S.live; rawErr = null; days(); paint();
     }).catch(function (e) { rawErr = e.message; $('totsub').textContent = 'Could not load data: ' + e.message; });
   }
 
+  /* replay: water level at the end of each 20:00 Bangkok day, from realised P&L only (open trades are not shown in the past) */
+  var RESET_AT = '2026-10-18T05:00:00Z', view = null;
+  function days() {
+    var t0 = Date.parse(RESET_AT), now = Date.now(), b = [], t = nextCloseAt(t0);
+    while (t <= now) { b.push(t); t += 86400000; }
+    S.bounds = b; var r = $('rps'); r.max = b.length; if (view === null || view > b.length) r.value = b.length; else r.value = view; setView(+r.value, true);
+  }
+  function nextCloseAt(ms) { var d = new Date(ms), t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), CLOSE_H); if (t <= ms) t += 86400000; return t; }
+  function setView(v, keep) {
+    view = v; var live = v >= S.bounds.length; $('rpl').textContent = live ? 'Live' : 'End of day ' + (v + 1) + ' (20:00 ' + new Date(S.bounds[v] + 7 * 3600000).toISOString().slice(5, 10) + ')';
+    if (live || !S.pos) S.desks = S.live || []; else S.desks = DESKS.map(function (d) {
+      var real = 0, legs = []; S.pos.forEach(function (p) { if (p.status === 'closed' && p.coin.slice(-(d[0].length + 1)) === ':' + d[0] && p.closed_at && Date.parse(p.closed_at) <= S.bounds[v] + 30 * 60000) real += +p.pnl || 0; });
+      return { key: d[0], name: d[1], sub: d[2], real: real, open: 0, eq: BANK + real, legs: legs };
+    });
+    paint();
+  }
+  /* the closing bell: when new trades have closed, the bubbles pop and a banner shows the result */
+  function ring8(pos) {
+    var since = Date.now() - 20 * 60000, by = {};
+    pos.forEach(function (p) { if (p.status === 'closed' && p.closed_at && Date.parse(p.closed_at) >= since) { var k = p.coin.split(':')[1]; by[k] = (by[k] || 0) + (+p.pnl || 0); } });
+    bell(by);
+  }
+  function bell(by) {
+    var keys = Object.keys(by), tot = keys.reduce(function (s, k) { return s + by[k]; }, 0), el = $('bell');
+    el.innerHTML = '&#128276; Closing bell: ' + keys.length + ' desks settled, together <span class="' + cls(tot) + '">' + money(tot) + '</span>'; el.style.display = 'block'; setTimeout(function () { el.style.display = 'none'; }, 12000);
+    Object.keys(cards).forEach(function (k) { cards[k].pop = 1; });
+  }
   function paint() {
     var g = $('grid');
     S.desks.forEach(function (d) {
@@ -96,7 +128,7 @@
       if (!c) {
         var el = document.createElement('div'); el.className = 'tank';
         el.innerHTML = '<h3><b></b><span></span></h3><canvas width="500" height="360"></canvas><p></p>';
-        g.appendChild(el); c = cards[d.key] = { el: el, cv: el.querySelector('canvas'), h: el.querySelector('h3 b'), v: el.querySelector('h3 span'), p: el.querySelector('p'), lvl: 0.5, seed: Math.random() * 6 };
+        g.appendChild(el); c = cards[d.key] = { pop: 0, el: el, cv: el.querySelector('canvas'), h: el.querySelector('h3 b'), v: el.querySelector('h3 span'), p: el.querySelector('p'), lvl: 0.5, seed: Math.random() * 6 };
         c.cv.addEventListener('mousemove', function (ev) { hover(ev, d.key); }); c.cv.addEventListener('mouseleave', function () { $('tip').style.display = 'none'; });
       }
       c.d = d; var tot = d.eq - BANK;
@@ -145,7 +177,8 @@
       x.fillStyle = txt; x.font = '700 ' + Math.max(11, Math.min(15, r * 0.7)) + 'px ui-monospace,monospace'; x.textAlign = 'center'; x.fillText(String(l.coin).slice(0, 5), bx, by + 4); x.textAlign = 'left';
       hb.push({ x: bx, y: by, r: r, l: l });
     });
-    if (!n) { x.fillStyle = mut; x.font = '600 20px system-ui'; x.fillText('waiting for the next batch', 14, H - 16); }
+    if (c.pop > 0) { hb.forEach(function (b) { x.beginPath(); x.arc(b.x, b.y, b.r + (1 - c.pop) * 60, 0, 7); x.strokeStyle = b.l.pnl >= 0 ? up : dn; x.globalAlpha = c.pop; x.lineWidth = 4; x.stroke(); }); x.globalAlpha = 1; c.pop = Math.max(0, c.pop - 0.015); }
+    if (!n) { x.fillStyle = mut; x.font = '600 20px system-ui'; x.fillText(view !== null && S.bounds && view < S.bounds.length ? 'all trades closed' : 'waiting for the next batch', 14, H - 16); }
     x.restore(); x.strokeStyle = line; x.lineWidth = 2; x.strokeRect(0, 0, W, H);
   }
 
@@ -161,6 +194,10 @@
     x.fillStyle = txt; x.font = '700 30px ui-monospace,monospace'; x.textAlign = 'center'; x.fillText('8pm', cx, cy + 10); x.textAlign = 'left';
     var h = Math.floor(left / 3600000), m = Math.floor(left % 3600000 / 60000); $('cd').textContent = h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
   }
+  $('rps').addEventListener('input', function () { setView(+this.value); });
+  $('rpb').addEventListener('click', function () { $('rps').value = $('rps').max; setView(S.bounds.length); });
+  $('bellb').addEventListener('click', function () { var by = {}; (S.live || []).forEach(function (d) { by[d.key] = d.open; }); bell(by); });
+  S.bounds = [];
   var t0 = performance.now();
   function frame(ts) {
     var t = (ts - t0) / 1000; ring(t);
