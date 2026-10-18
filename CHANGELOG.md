@@ -39,6 +39,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.37.6
+- Saga: premium gold styling, sunglasses and money rain on winners, coin quips, breaking-news ticker, verdict stamp
+
 ## v1.37.5
 - Bold red stop line with danger zone and STOP flag in Saga and Batch tracker
 
