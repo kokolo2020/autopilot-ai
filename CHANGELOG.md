@@ -37,6 +37,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.37.4
+- Saga: stop gauges, danger drama near the stop, stop-hit explosions, desk chips
+
 ## v1.37.3
 - Links to Tide Room, Batch tracker, Stories and Saga from the research and public pages
 
