@@ -41,6 +41,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.37.8
+- Saga: coins green when winning, red when losing
+
 ## v1.37.7
 - Saga: each coin lane scaled to its own stop so the graph reads clearly; no label overlaps; legend line
 

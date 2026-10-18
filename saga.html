@@ -25,7 +25,7 @@
 <body>
 <div class="wrap">
   <h1>THE GREAT BATCH SAGA <small style="color:var(--mut);font-weight:500;font-size:12px;letter-spacing:0">· all 10 coins of Neutral Rev batch 1 · <a href="/story.html">Short stories</a> · <a href="/arena.html">Tide Room</a></small></h1>
-  <div class="sub" id="src">Bear and bull each picked five coins. Red line = that coin's stop. The closer a coin slides to it, the more trouble. Paper money.</div>
+  <div class="sub" id="src">Bear and bull each picked five coins. Green coin = winning, red coin = losing. Red line = its stop. The closer a coin slides to it, the more trouble. Paper money.</div>
   <canvas id="c" width="1000" height="700" aria-label="Animation of all ten coins of batch 1"></canvas>
   <div class="row" id="chips"></div>
   <div class="row"><button id="re" type="button">Replay</button><button id="sp" type="button">Pause</button></div>
@@ -101,8 +101,9 @@
   function balloon(bx, by, col, t, k) { x.strokeStyle = '#8b98a8'; x.lineWidth = 2; x.beginPath(); x.moveTo(bx, by + 30); x.lineTo(bx + Math.sin(t * 2 + k) * 6, by + 85); x.stroke(); x.fillStyle = col; x.beginPath(); x.ellipse(bx, by, 22, 28, 0, 0, 7); x.fill(); x.fillStyle = 'rgba(255,255,255,.35)'; x.beginPath(); x.ellipse(bx - 7, by - 9, 5, 8, 0, 0, 7); x.fill(); }
   function bubbleText(txt, bx, by, w) { x.font = '700 22px system-ui'; var tw = Math.min(w, x.measureText(txt).width + 28); x.fillStyle = '#fff'; x.strokeStyle = '#111'; x.lineWidth = 3; x.beginPath(); x.roundRect ? x.roundRect(bx, by, tw, 44, 14) : x.rect(bx, by, tw, 44); x.fill(); x.stroke(); x.fillStyle = '#111'; x.fillText(txt, bx + 14, by + 30); }
 
+  var COIN = ['#f3ba2f', '#b8860b'];
   function coinFace(cx, cy, r, label, mood, t) {
-    x.fillStyle = '#f3ba2f'; x.beginPath(); x.arc(cx, cy, r, 0, 7); x.fill(); x.strokeStyle = '#b8860b'; x.lineWidth = 3; x.stroke();
+    x.save(); x.shadowColor = COIN[0]; x.shadowBlur = 14; x.fillStyle = COIN[0]; x.beginPath(); x.arc(cx, cy, r, 0, 7); x.fill(); x.restore(); x.strokeStyle = COIN[1]; x.lineWidth = 3; x.stroke();
     x.fillStyle = '#fff'; [-1, 1].forEach(function (d) { x.beginPath(); x.arc(cx + d * r * 0.34, cy - r * 0.2, r * 0.2, 0, 7); x.fill(); });
     x.fillStyle = '#222'; [-1, 1].forEach(function (d) { x.beginPath(); x.arc(cx + d * r * 0.34 + mood * 1.5, cy - r * 0.18, r * 0.09, 0, 7); x.fill(); });
     x.strokeStyle = '#222'; x.lineWidth = 3; x.lineCap = 'round'; x.beginPath();
@@ -141,6 +142,7 @@
       if (l.sl && pg > 0.4 && !st) { var pulse = 0.5 + 0.5 * Math.sin(t * (6 + pg * 10)); x.fillStyle = '#ff3b3b'; x.globalAlpha = (0.12 + 0.3 * pulse) * pg; x.beginPath(); x.arc(cx, cy, r + 14 + pulse * 10 * pg, 0, 7); x.fill(); x.globalAlpha = 1; }
       if (!st) { if (pct * mv > 0.00001 && t > 3.5) { [-1, 1].forEach(function (d, k) { balloon(cx + d * 12, cy - 64 - k * 4, k ? '#6aa9ff' : '#ff6b6b', t, i + k); }); }
         else if (pct * mv < -0.00001 && t > 3.5) { x.fillStyle = '#555c6b'; x.fillRect(cx - 22, cy - 50, 44, 11); x.fillStyle = '#fff'; x.font = '800 11px ui-monospace,monospace'; x.fillText('DIP', cx - 10, cy - 41); } }
+      var pv = lp(l); COIN = pv > 0.004 ? ['#3ddc97', '#1b8f63'] : pv < -0.004 ? ['#ff6b6b', '#b02a2a'] : ['#f3ba2f', '#b8860b'];
       coinFace(cx, cy, r, l.c.length > 4 ? l.c.slice(0, 4) : l.c, (win && pg < 0.55) ? 1 : -1, t);
       if (win && pg < 0.3 && !st && t > 5) { x.fillStyle = '#111'; x.fillRect(cx - r * 0.7, cy - r * 0.35, r * 0.6, r * 0.34); x.fillRect(cx + r * 0.1, cy - r * 0.35, r * 0.6, r * 0.34); x.fillRect(cx - r * 0.1, cy - r * 0.28, r * 0.2, 3); x.fillStyle = 'rgba(255,255,255,.35)'; x.fillRect(cx - r * 0.6, cy - r * 0.3, r * 0.2, 3);
         if (Math.abs(lp(l)) > 0.05) for (var mi = 0; mi < 2; mi++) { var my = ((t * 38 + mi * 30 + i * 11) % 60); x.globalAlpha = 1 - my / 60; x.fillStyle = '#3ddc97'; x.font = '800 16px system-ui'; x.textAlign = 'center'; x.fillText('$', cx + (mi ? 18 : -18), cy - r - 6 - my); x.textAlign = 'left'; x.globalAlpha = 1; } }
