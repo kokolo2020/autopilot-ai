@@ -52,6 +52,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.43
+- Rev 2 limit now exits at 20:00 with a limit order too (maker fee both ways; stops and resets stay market). My picks: RUNE and CARDS open using OKX spot, Gate.io or MEXC prices since OKX has no perpetual for them
+
 ## v1.42
 - Study round 2: month (30-day BTC) trend tables, year-by-year down-day signal, non-overlapping trades, long weakest + short BTC hedge
 

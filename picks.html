@@ -22,7 +22,7 @@
   <div class="cards" id="cards"></div>
   <div class="scroll"><table id="t"></table></div>
   <p class="mut" id="miss"></p>
-  <p class="mut">20 coins you chose, $250 margin each at 3x on OKX perpetuals ($750 per position, $5,000 in total), all long, opened once and held with no daily close. Each time a coin falls another 18% below its latest entry, $100 more margin at 3x is added (up to 4 add-ons per coin, each shown as its own line). A leg is closed as "liquidated" at -32%. P&amp;L is the price move on the $750 position, before fees and funding (both are booked when a leg closes). Paper money. <a href="/research">Back to research</a> · <a href="/regime.html">Market regimes</a></p>
+  <p class="mut">20 coins you chose, $250 margin each at 3x on OKX perpetuals (RUNE and CARDS have no OKX perpetual, so they are priced from OKX spot or a Gate.io / MEXC perpetual; no funding is booked for them) ($750 per position, $5,000 in total), all long, opened once and held with no daily close. Each time a coin falls another 18% below its latest entry, $100 more margin at 3x is added (up to 4 add-ons per coin, each shown as its own line). A leg is closed as "liquidated" at -32%. P&amp;L is the price move on the $750 position, before fees and funding (both are booked when a leg closes). Paper money. <a href="/research">Back to research</a> · <a href="/regime.html">Market regimes</a></p>
 </div>
 <script>
 (function () {
@@ -45,7 +45,7 @@
     }).join('') : '<tr><td colspan="7" class="mut">No positions yet. They open on the next 5-minute tick after the desk goes live.</td></tr>');
     var have = {}; pos.forEach(function (p) { have[p.coin.split(':')[0]] = 1; });
     var miss = WANT.filter(function (c) { return !have[c]; });
-    $('miss').textContent = miss.length ? 'Not open yet: ' + miss.join(', ') + '. These are either waiting for the next tick or have no OKX USDT perpetual; the desk retries them every tick.' : '';
+    $('miss').textContent = miss.length ? 'Not open yet: ' + miss.join(', ') + '. These are waiting for the next tick (within 5 minutes) or have no price on OKX, Gate.io or MEXC; the desk retries every tick.' : '';
     $('st').textContent = 'Updated ' + new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Bangkok' }) + ' Bangkok · live prices from OKX, refreshes every 30 s';
   }
   function load() { return Promise.all([get('ap_positions', 'select=coin,status,entry_price,exit_price,notional,pnl,close_reason&coin=like.*:pick&order=id.asc&limit=100'), fetch('/.netlify/functions/prices').then(function (r) { return r.json(); }).catch(function () { return {}; })]).then(function (r) { pos = r[0]; px = r[1]; paint(); }).catch(function (e) { $('st').textContent = 'Could not load: ' + e.message; }); }

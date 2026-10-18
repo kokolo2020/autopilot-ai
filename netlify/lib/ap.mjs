@@ -26,6 +26,7 @@ export const MODES = [
   { id: 'g', suffix: ':g', name: 'Gated AI', gate: 0.50, cap: 10, picks: 8, minTp: 0.35, gateShort: true }
 ];
 export const SHORT_GATE_BREADTH = 0.9;
+/* v1.43: Rev 2 limit (:revm) also exits at the 20:00 close with a limit order (maker fee). Stops and resets stay market orders (taker). Rows closed before v1.43 keep the taker exit fee they were booked with. */
 export const MAKER_FEE = 0.0002, LIMIT_OFF = 0.10, LIMIT_WAIT_MIN = 10, FILL_THROUGH = 0.0002;
 export const PICKS = 16;
 const modeOf = (key) => (/:m$/.test(key) ? 'm' : /:g$/.test(key) ? 'g' : /:n$/.test(key) ? 'n' : /:s$/.test(key) ? 's' : /:u$/.test(key) ? 'u' : key.includes(':') ? null : 'a');
@@ -212,7 +213,7 @@ export const spotFees = (p, endMs) => +p.notional * SPOT.fee * 2 + (/:spm$/.test
 const closePos = async (db, p, exit, why) => {
   const dir = p.side === 'LONG' ? 1 : -1;
   const funding = /:(r3[dwmyl]|pick)$/.test(p.coin) ? await rev3Funding(p).catch(() => 0) : 0;
-  const fees = /:sp[lm]$/.test(p.coin) ? spotFees(p, Date.now()) : /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - RM * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + FEE) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
+  const fees = /:sp[lm]$/.test(p.coin) ? spotFees(p, Date.now()) : /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - RM * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + (String(why) === 'time exit' ? MAKER_FEE : FEE)) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
   await db.update('ap_positions', 'id=eq.' + p.id, { status: 'closed', exit_price: exit, closed_at: new Date().toISOString(), pnl, fees, close_reason: funding ? why + ' | funding ' + (funding >= 0 ? '+' : '') + funding.toFixed(2) : why });
   return pnl;
 };
@@ -435,7 +436,7 @@ export const ALGOT_COINS = ['AAVE', 'TIA', 'ICP', 'ZEC', 'ENA', 'APT', 'ARB', 'O
 /* Neutral Reversal 2 (:rev2, market orders) and its limit-order twin (:revm). Same ranking as :rev (long the 8 weakest, short the 8 strongest by 24h change, one batch per 24h, 24h hold, no take profit).
    Differences: leg 1 opens at 4x with a 10% stop (15% before v1.27). When the stop hits, the loss is booked and the SAME side reopens at the market price one leverage step higher (5x, 6x, 7x) with the same batch deadline.
    After the stop at 7x the leg is done (3 resets max). Every entry is a fresh $250 margin, so one leg can commit up to $1,000 margin and book up to roughly $825 of losses.
-   The stop is kept just inside liquidation (1/lev minus 1%), so at 7x it would be 13.3%, which the 10% stop never reaches (a real 7x position is liquidated near 14.3%). :revm places leg 1 as a limit order 0.10% better, waits 10 minutes, pays maker fee on that entry; resets are market orders. Forward test. */
+   The stop is kept just inside liquidation (1/lev minus 1%), so at 7x it would be 13.3%, which the 10% stop never reaches (a real 7x position is liquidated near 14.3%). :revm places leg 1 as a limit order 0.10% better, waits 10 minutes, pays maker fee on that entry; from v1.43 it also exits at the 20:00 close as a limit order (maker fee, filled at the close price); stops and resets are market orders. Forward test. */
 /* All Rev-family batches close at 20:00 Bangkok (13:00 UTC) every day and the next batch opens right after. The first batch after a reset is shorter. */
 export const CLOSE_UTC_H = 13;
 export const boundaryAt = (now) => { const d = new Date(now); let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), CLOSE_UTC_H); if (t > now) t -= 86400000; return t; }; // latest 20:00 Bangkok at or before now
@@ -791,11 +792,29 @@ export async function revxTick(db, rows, openPos, ctl) {
 /* :pick My picks (paper, Koko's own 20 coins). $250 margin each at 3x on OKX perpetuals ($750 notional, $5,000 in total), all LONG, opened once at the first tick and then held (no daily close, no take profit).
    A long at 3x is liquidated near -33%, so a leg is closed at -32% as "liquidated". Funding is booked into pnl when a leg closes. Coins with no OKX USDT perpetual are skipped and listed on picks.html. */
 export const MYPICKS = { coins: ['ZEN', 'NEAR', 'OP', 'ARB', 'RUNE', 'JTO', 'MON', 'EGLD', 'HYPE', 'SOL', 'SUI', 'GRAM', 'WLD', 'VVV', 'JUP', 'RAY', 'AERO', 'XRP', 'AVAX', 'CARDS'], margin: 250, lev: 3, liqAt: -0.32, addAt: -0.18, addMargin: 100, maxAdds: 4 };
+/* Price for a My-picks coin that has no OKX USDT perpetual: OKX spot first, then Gate.io and MEXC USDT perpetuals (public tickers). Returns { last, ask, src } or null. */
+export async function pickQuote(c, okxSpot) {
+  const sp = okxSpot && okxSpot[c + '-USDT']; if (sp && sp.last > 0) return Object.assign({ src: 'OKX spot' }, sp);
+  const tries = [
+    ['Gate perp', 'https://api.gateio.ws/api/v4/futures/usdt/tickers?contract=' + c + '_USDT', (j) => j && j[0] && { last: +j[0].last, ask: +j[0].lowest_ask || +j[0].last }],
+    ['MEXC perp', 'https://contract.mexc.com/api/v1/contract/ticker?symbol=' + c + '_USDT', (j) => j && j.data && { last: +j.data.lastPrice, ask: +j.data.ask1 || +j.data.lastPrice }],
+    ['Gate spot', 'https://api.gateio.ws/api/v4/spot/tickers?currency_pair=' + c + '_USDT', (j) => j && j[0] && { last: +j[0].last, ask: +j[0].lowest_ask || +j[0].last }],
+  ];
+  for (const [src, url, f] of tries) {
+    try { const r = await fetch(url, { headers: { 'User-Agent': 'agent-desk-autopilot' } }); if (!r.ok) continue; const q = f(await r.json()); if (q && q.last > 0) return Object.assign({ src }, q); } catch (e) { /* next source */ }
+  }
+  return null;
+}
 export async function picksTick(db, ctl) {
   const out = [];
   if (ctlBlocks(ctl, 'pick', '')) return out;
   const all = await db.select('ap_positions', 'select=id,coin,status,entry_price,notional,opened_at,side,close_reason&coin=like.*:pick&limit=200');
   const tk = {}; for (const t of await okx('/api/v5/market/tickers?instType=SWAP')) tk[t.instId] = { last: +t.last, ask: +t.askPx > 0 ? +t.askPx : +t.last };
+  const miss = MYPICKS.coins.filter((c) => !tk[c + '-USDT-SWAP']);
+  if (miss.length) { // RUNE, CARDS etc.: no OKX perpetual, so price them from OKX spot or another exchange's perpetual (paper only)
+    const okxSpot = {}; try { for (const t of await okx('/api/v5/market/tickers?instType=SPOT')) okxSpot[t.instId] = { last: +t.last, ask: +t.askPx > 0 ? +t.askPx : +t.last }; } catch (e) { /* spot list unavailable */ }
+    for (const c of miss) { const q = await pickQuote(c, okxSpot); if (q) tk[c + '-USDT-SWAP'] = q; }
+  }
   for (const p of all.filter((x) => x.status === 'open')) { const t = tk[p.coin.split(':')[0] + '-USDT-SWAP']; if (t && t.last <= +p.entry_price * (1 + MYPICKS.liqAt)) { const x = await closePos(db, p, +p.entry_price * (1 + MYPICKS.liqAt), 'liquidated'); out.push(p.coin + ' liquidated ' + x.toFixed(2)); } }
   const had = new Set(all.map((x) => x.coin.split(':')[0]));
   const byCoin = {}; for (const x of all) (byCoin[x.coin] = byCoin[x.coin] || []).push(x);
@@ -808,10 +827,10 @@ export async function picksTick(db, ctl) {
   }
   for (const c of MYPICKS.coins) {
     if (had.has(c)) continue;
-    const t = tk[c + '-USDT-SWAP']; if (!t || !(t.ask > 0)) { out.push('pick ' + c + ' has no OKX USDT perpetual'); continue; }
+    const t = tk[c + '-USDT-SWAP']; if (!t || !(t.ask > 0)) { out.push('pick ' + c + ' has no price on OKX, Gate or MEXC'); continue; }
     const notional = MYPICKS.margin * MYPICKS.lev, d = decFor(t.ask);
     await db.insert('ap_positions', { coin: c + ':pick', side: 'LONG', entry_price: t.ask, size: notional / t.ask, notional, tp: +(t.ask * 100).toFixed(d), sl: +(t.ask * (1 + MYPICKS.liqAt)).toFixed(d), max_hold_until: '2099-12-31T00:00:00Z' });
-    out.push('pick opened LONG ' + c + ' $' + notional);
+    out.push('pick opened LONG ' + c + ' $' + notional + (t.src ? ' (priced from ' + t.src + ')' : ''));
   }
   return out;
 }
