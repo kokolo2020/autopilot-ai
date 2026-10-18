@@ -49,6 +49,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.40
+- New: History study page (years of daily OKX data: does buying the weakest and shorting the strongest work in bear, transition and bull phases, and what long/short split is best)
+
 ## v1.39.2
 - My picks: add-on ladder (+$100 at 3x every further 18% down, max 4 per coin)
 
