@@ -54,6 +54,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.44
+- Daily close moved from 8pm to 7am Bangkok for all daily desks; open legs close at 7am today and the next batch opens right after (weekly desk and My picks unchanged)
+
 ## v1.43.1
 - Fix: Neutral Rev scale-out rules were wired into the wrong function, so the desk ran as Neutral Rev with a plain -10% stop (full-size stops). Scale-out now runs as designed
 

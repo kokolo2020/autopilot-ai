@@ -438,7 +438,14 @@ export const ALGOT_COINS = ['AAVE', 'TIA', 'ICP', 'ZEC', 'ENA', 'APT', 'ARB', 'O
    After the stop at 7x the leg is done (3 resets max). Every entry is a fresh $250 margin, so one leg can commit up to $1,000 margin and book up to roughly $825 of losses.
    The stop is kept just inside liquidation (1/lev minus 1%), so at 7x it would be 13.3%, which the 10% stop never reaches (a real 7x position is liquidated near 14.3%). :revm places leg 1 as a limit order 0.10% better, waits 10 minutes, pays maker fee on that entry; from v1.43 it also exits at the 20:00 close as a limit order (maker fee, filled at the close price); stops and resets are market orders. Forward test. */
 /* All Rev-family batches close at 20:00 Bangkok (13:00 UTC) every day and the next batch opens right after. The first batch after a reset is shorter. */
-export const CLOSE_UTC_H = 13;
+export const CLOSE_UTC_H = 0; // 07:00 Bangkok since v1.44 (was 13 = 20:00 Bangkok)
+/* Daily desks whose batch deadline follows the daily close. When the close time moves, open legs with a later deadline are pulled in to the next close (pullDeadlines). Weekly/monthly/yearly desks and My picks are not touched. */
+export const DAILY_DESK_RE = /:(rev|rev2|revm|rev2s|revs|revx|flip|revv|caprev|spl|spm|r3d|r3l)$/;
+export async function pullDeadlines(db, rows, now = Date.now()) {
+  const nc = nextClose(now), out = [];
+  for (const p of rows) if (DAILY_DESK_RE.test(p.coin) && p.max_hold_until && new Date(p.max_hold_until).getTime() > nc + 60000) { p.max_hold_until = new Date(nc).toISOString(); await db.update('ap_positions', 'id=eq.' + p.id, { max_hold_until: p.max_hold_until }); out.push(p.coin); }
+  return out;
+}
 export const boundaryAt = (now) => { const d = new Date(now); let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), CLOSE_UTC_H); if (t > now) t -= 86400000; return t; }; // latest 20:00 Bangkok at or before now
 export const nextClose = (now, days = 1) => boundaryAt(now) + days * 86400000;
 export const batchDue = (last, now, days = 1) => !last || new Date(last.opened_at).getTime() < boundaryAt(now) - (days - 1) * 86400000;
@@ -901,9 +908,11 @@ export async function tickAll(env) {
   const { rows, db } = await scanAll(env);
   const ctl = await loadControl(db); ctl.auto = await autoPaused(db, ctl.lossLimit);
   const openAll = await db.select('ap_positions', 'select=*&status=eq.open');
+  const pulled = await pullDeadlines(db, openAll).catch(() => []);
   const open = openAll.filter((p) => !p.coin.includes(':')), openAlgo = {}, openMir = openAll.filter((p) => /:[nsumg]$/.test(p.coin)), cnt = { n: 0, a: 0, s: 0, u: 0, m: 0, g: 0 };
   for (const p of openAll) { const k = modeOf(p.coin); if (k) cnt[k]++; }
   const pend = await db.select('ap_positions', 'select=*&status=eq.pending').catch(() => []);
+  await pullDeadlines(db, pend).catch(() => []);
   cnt.m += pend.filter((pp) => !/:rev/.test(pp.coin)).length;
   const pendRes = await Promise.all(pend.map((pp) => { const r = rows.find((x) => x.coin === pp.coin.split(':')[0]); return r ? limitTick(db, pp, r.m).then((x) => { if (x !== 'waiting' && !/:rev/.test(pp.coin)) cnt.m--; return pp.coin + ' ' + x; }).catch(() => null) : null; }));
   for (const p of openAll) if (p.coin.endsWith(':algo') || p.coin.endsWith(':algo2') || p.coin.endsWith(':algo3') || p.coin.endsWith(':algo3b') || p.coin.endsWith(':algoq') || p.coin.endsWith(':algow') || p.coin.endsWith(':algox') || p.coin.endsWith(':algot')) openAlgo[p.coin] = p;
@@ -954,7 +963,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, deadlinesPulled: pulled.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */
