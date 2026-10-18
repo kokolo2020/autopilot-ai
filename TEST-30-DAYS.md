@@ -21,3 +21,9 @@ Anything else. Say so in the Day 30 post and name the rule that failed.
 
 ## Extra (not part of pass/fail): Funding Carry v2, added 18 Oct 2026
 $1,000 bank: up to 5 coins, each $100 spot + $100 short perp (1x). Enters only when funding is at least 0.03% per settlement; exits after 3 settlements in a row below 0.005%. Judged on net P&L after fees and yearly pace on money in use. Idea from the perp/spot carry research (Sharpe about 1.8 for BTC at retail costs).
+
+## Extra test desks (added 18 Oct 2026, not part of pass/fail; each has its own $1,000 bank)
+Ideas for lower losses in a bear market, all paper, all judged on the same four numbers at Day 30:
+1. Capitulation Rev: Neutral Rev (5x, no stops) opens a batch only when the average 24h change of the coins is -1% or lower, otherwise it stays in cash.
+2. Rev 3 low-leverage: Rev 3 rules but 2x then 3x instead of 4x to 7x. Worst case per leg is about $20 instead of $40.
+3. Neutral Rev weekly: one batch per 7 days (5x, no stops) to cut fees.
