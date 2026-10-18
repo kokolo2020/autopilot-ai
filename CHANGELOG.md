@@ -33,6 +33,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.37
+- Batch Tracker page: per-trade price, stop and take-profit charts with time rewind
+
 ## v1.36.1
 - Tide Room: replay slider and 8pm closing bell
 
