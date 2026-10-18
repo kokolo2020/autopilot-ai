@@ -51,6 +51,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.42
+- Study round 2: month (30-day BTC) trend tables, year-by-year down-day signal, non-overlapping trades, long weakest + short BTC hedge
+
 ## v1.41
 - Study v2: compares against the market average (fixes the median error), holds of 1, 3 and 7 days, fee scenarios (0.11%, 0.075%, 0.04%), and down-day thresholds of -1%, -2%, -3%
 

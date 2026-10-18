@@ -55,12 +55,12 @@
       names.forEach(function (c) { var a = data[c][day - 1], b = data[c][day]; if (a && b) el.push({ c: c, r: b / a - 1 }); });
       if (el.length < 14) continue;
       el.sort(function (x, y) { return x.r - y.r; });
-      var o = { day: day, yr: new Date(day * DAY).getUTCFullYear(), reg: reg, m1: mean(el.map(function (x) { return x.r; })) * 100, h: {} };
+      var o = { day: day, yr: new Date(day * DAY).getUTCFullYear(), reg: reg, m1: mean(el.map(function (x) { return x.r; })) * 100, m30: bs[i - 30] ? (bs[i] / bs[i - 30] - 1) * 100 : null, h: {} };
       HS.forEach(function (H) {
         var e2 = el.map(function (x) { var z = data[x.c][day + H], b = data[x.c][day]; return z && b ? { r: x.r, f: (z / b - 1) * 100 } : null; }).filter(Boolean); if (e2.length < 14) return;
         var f = e2.map(function (x) { return x.f; }), k = [];
         for (var L = 0; L <= 10; L++) { var lg = f.slice(0, L), sh = L === 10 ? [] : f.slice(-(10 - L)); k.push((lg.reduce(function (s, x) { return s + x; }, 0) - sh.reduce(function (s, x) { return s + x; }, 0)) / 10); }
-        o.h[H] = { weak: mean(f.slice(0, 5)), strong: mean(f.slice(-5)), mk: mean(f), k: k };
+        var bz = data.BTC[day + H], bb = data.BTC[day]; o.h[H] = { btc: bz && bb ? (bz / bb - 1) * 100 : null, weak: mean(f.slice(0, 5)), strong: mean(f.slice(-5)), mk: mean(f), k: k };
       });
       if (o.h[1]) rec.push(o);
     }
@@ -98,6 +98,28 @@
     h += '<h2>D. By year (5L/5S, hold ' + Hsel + 'd, net @ 0.075%)</h2><div class="scroll"><table><tr><th>Year</th><th>Days</th><th>5L/5S net per leg</th><th>Weakest vs market</th><th>Bear days</th><th>Transition</th><th>Bull</th></tr>'; t += 'D) by year hold ' + Hsel + 'd: days net5L5S weak-mkt bear/trans/bull\n';
     Object.keys(yrs).sort().forEach(function (y) { var r = yrs[y], g = mean(r.map(function (x) { return (x.h[Hsel].weak - x.h[Hsel].strong) / 2; })) - 0.075, w = mean(r.map(function (x) { return x.h[Hsel].weak - x.h[Hsel].mk; })), c = function (q) { return r.filter(function (x) { return x.reg === q; }).length; };
       h += '<tr><td>' + y + '</td><td>' + r.length + '</td><td class="' + cls(g) + '">' + f2(g) + '</td><td class="' + cls(w) + '">' + f2(w) + '</td><td>' + c('bear') + '</td><td>' + c('transition') + '</td><td>' + c('bull') + '</td></tr>'; t += y + ' ' + r.length + ' ' + f2(g) + ' ' + f2(w) + ' ' + c('bear') + '/' + c('transition') + '/' + c('bull') + '\n'; });
+    h += '</table></div>';
+
+    var nonov = function (r, H) { var out = [], last = -1e9; r.sort(function (a, b) { return a.day - b.day; }).forEach(function (x) { if (x.day >= last + H) { out.push(x); last = x.day; } }); return out; };
+    var row = function (lab, r, H) {
+      if (r.length < 3) return { h: '<tr><td>' + lab + '</td><td>' + r.length + '</td><td colspan="6" class="mut">too few</td></tr>', t: lab + ' ' + r.length + ' too few\n' };
+      var w = mean(r.map(function (x) { return x.h[H].weak - x.h[H].mk; })), g = mean(r.map(function (x) { return (x.h[H].weak - x.h[H].strong) / 2; })), hb = r.filter(function (x) { return x.h[H].btc != null; }), hg = mean(hb.map(function (x) { return x.h[H].weak - x.h[H].btc; })), lo = mean(r.map(function (x) { return x.h[H].k[10]; })), win = r.filter(function (x) { return x.h[H].weak > x.h[H].mk; }).length / r.length * 100;
+      return { h: '<tr><td>' + lab + '</td><td>' + r.length + '</td><td class="' + cls(w) + '">' + f2(w) + '</td><td>' + win.toFixed(0) + '%</td><td class="' + cls(g - 0.11) + '">' + f2(g - 0.11) + '</td><td class="' + cls(hg - 0.16) + '">' + f2(hg - 0.16) + '</td><td class="' + cls(lo) + '">' + f2(lo) + '</td></tr>', t: lab + ' ' + r.length + ' ' + f2(w) + ' ' + win.toFixed(0) + '% ' + f2(g - 0.11) + ' ' + f2(hg - 0.16) + ' ' + f2(lo) + '\n' };
+    };
+    var th2 = '<div class="scroll"><table><tr><th>Group</th><th>Independent trades</th><th>Weakest 5 vs market</th><th>Weakest beat market</th><th>5L/5S net @0.11%</th><th>Long weakest 5 + short BTC, net</th><th>10L/0S gross</th></tr>';
+    var HE = Hsel, down2 = function (x) { return x.m1 <= -2; };
+    h += '<h2>E. Round 2: after a -2% market day, NON-overlapping trades only (hold ' + HE + 'd)</h2>' + th2; t += 'E) after -2% day, non-overlapping, hold ' + HE + 'd: n weak-mkt beat% 5L5S-net hedged-net 10L0S\n';
+    var yE = {}; sel(down2, HE).forEach(function (x) { (yE[x.yr] = yE[x.yr] || []).push(x); });
+    var allE = row('All years', nonov(sel(down2, HE), HE), HE); h += allE.h; t += allE.t;
+    Object.keys(yE).sort().forEach(function (y) { var q = row(y, nonov(yE[y], HE), HE); h += q.h; t += q.t; });
+    h += '</table></div><div class="sub">Hedged = long the 5 weakest, short BTC with the same size, costs 0.16% (0.11% + 0.05% for the BTC leg). If the edge only shows in one year, it is a crash story, not a rule.</div>';
+    h += '<h2>F. Month trend: does the 30-day BTC trend change the result? (after a -1% market day, hold ' + HE + 'd, non-overlapping)</h2>' + th2; t += 'F) 30d BTC trend, after -1% day, hold ' + HE + 'd\n';
+    [['Month down more than 15%', function (x) { return x.m30 != null && x.m30 < -15; }], ['Month down 5 to 15%', function (x) { return x.m30 != null && x.m30 >= -15 && x.m30 < -5; }], ['Month flat (-5 to +5%)', function (x) { return x.m30 != null && x.m30 >= -5 && x.m30 <= 5; }], ['Month up 5 to 15%', function (x) { return x.m30 != null && x.m30 > 5 && x.m30 <= 15; }], ['Month up more than 15%', function (x) { return x.m30 != null && x.m30 > 15; }]].forEach(function (g) {
+      var q = row(g[0], nonov(sel(function (x) { return x.m1 <= -1 && g[1](x); }, HE), HE), HE); h += q.h; t += q.t; });
+    h += '</table></div>';
+    h += '<h2>G. Month trend on ALL days (no down-day filter, hold ' + HE + 'd, non-overlapping)</h2>' + th2; t += 'G) 30d BTC trend, all days, hold ' + HE + 'd\n';
+    [['Month down more than 15%', function (x) { return x.m30 != null && x.m30 < -15; }], ['Month down 5 to 15%', function (x) { return x.m30 != null && x.m30 >= -15 && x.m30 < -5; }], ['Month flat (-5 to +5%)', function (x) { return x.m30 != null && x.m30 >= -5 && x.m30 <= 5; }], ['Month up 5 to 15%', function (x) { return x.m30 != null && x.m30 > 5 && x.m30 <= 15; }], ['Month up more than 15%', function (x) { return x.m30 != null && x.m30 > 15; }]].forEach(function (g) {
+      var q = row(g[0], nonov(sel(g[1], HE), HE), HE); h += q.h; t += q.t; });
     h += '</table></div>';
     $('out').innerHTML = h; text = t; $('cp').style.display = '';
   }
