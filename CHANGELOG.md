@@ -25,6 +25,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.31
+- Reset: ,000 bank per strategy, 00 per leg, 5+5 legs, 4 desks only, top-50 + min volume
+
 ## v1.30.6
 - Rev desks: rank only the fixed top-50 list (not watchlist extras)
 

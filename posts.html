@@ -117,7 +117,7 @@
 
 
   /* ---------- strategy spotlight ---------- */
-  var RULE = { rev: 'Each day: long the 8 coins that fell most, short the 8 that rose most, close after 24 hours. No stops.', rev2: 'The Neutral Rev picks, with a stop on every trade that reopens it at higher leverage.', revm: 'Neutral Rev 2 with limit-order entries.', algo3: 'Shorts bounces, but only when 90%+ of coins are already down.', algo3b: 'Shorts bounces when 80%+ of coins are down.', caprev: 'Neutral Rev, but only after the market is down 1%+ over 24 hours.', flip: 'The opposite of Neutral Rev: long the strongest coins, short the weakest.', revv: 'Neutral Rev with each trade sized by volatility.', r3d: 'Neutral Rev picks with a $25 stop per entry and a 4x to 7x ladder, closed after 24 hours.', r3w: 'The Rev 3 rules, closed after 7 days.', r3m: 'The Rev 3 rules, closed after 30 days.', r3y: 'The Rev 3 rules, closed after a year.' };
+  var RULE = { rev: 'Each day: long the 5 coins that fell most, short the 5 that rose most, close after 24 hours. No stops.', rev2: 'The Neutral Rev picks, with a stop on every trade that reopens it at higher leverage.', revm: 'Neutral Rev 2 with limit-order entries.', algo3: 'Shorts bounces, but only when 90%+ of coins are already down.', algo3b: 'Shorts bounces when 80%+ of coins are down.', caprev: 'Neutral Rev, but only after the market is down 1%+ over 24 hours.', flip: 'The opposite of Neutral Rev: long the strongest coins, short the weakest.', revv: 'Neutral Rev with each trade sized by volatility.', r3d: 'Neutral Rev picks with a $10 stop per entry and a 4x to 7x ladder, closed after 24 hours.', r3w: 'The Rev 3 rules, closed after 7 days.', r3m: 'The Rev 3 rules, closed after 30 days.', r3y: 'The Rev 3 rules, closed after a year.' };
   function series(desk) { return ALL.filter(function (r) { return r.desk === desk && +r.trades_closed > 0; }).sort(function (a, b) { return a.day < b.day ? -1 : 1; }); }
   function winners() {
     var last = {}; ALL.forEach(function (r) { if (+r.cum_trades > 0 && (!last[r.desk] || r.day > last[r.desk].day)) last[r.desk] = r; });
@@ -184,7 +184,7 @@
     c.textAlign = 'left'; c.fillStyle = '#6aa9ff'; c.font = '700 18px ' + sans; c.fillText('AUTOPILOT  ·  PAPER TRADING', 56, 52);
     c.fillStyle = '#f2f6fb'; c.font = '700 46px ' + sans; c.fillText(nm + '  ·  batch ' + b.no, 56, 106);
     var d0_ = new Date(b.start).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Bangkok' });
-    var px = 56; px = pill('Perpetual futures', px, 126, '#e6edf3'); px = pill(info[2], px, 126, '#e6edf3'); px = pill('$250 margin per coin', px, 126); pill(b.open ? 'open, live prices' : 'closed after 24 h', px, 126, b.open ? '#f5a623' : '#8b98a8');
+    var px = 56; px = pill('Perpetual futures', px, 126, '#e6edf3'); px = pill(info[2], px, 126, '#e6edf3'); px = pill('$100 margin per coin', px, 126); pill(b.open ? 'open, live prices' : 'closed after 24 h', px, 126, b.open ? '#f5a623' : '#8b98a8');
     c.textAlign = 'right'; c.fillStyle = up0 ? UP : DN; c.font = '800 78px ' + sans; c.fillText(m0(b.total), W - 56, 100);
     c.fillStyle = '#8b98a8'; c.font = '500 20px ' + sans; c.fillText('net after fees · opened ' + d0_, W - 56, 134);
     var cols = [['Short the strongest coins', b.legs.filter(function (l) { return l.side === 'SHORT'; })], ['Long the weakest coins', b.legs.filter(function (l) { return l.side === 'LONG'; })]], cw = 524, xs = [56, 620], top = 192;

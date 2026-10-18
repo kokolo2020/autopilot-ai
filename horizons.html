@@ -39,8 +39,8 @@
 <body>
 <div class="wrap">
   <h1>AUTOPILOT HORIZONS <span class="newb">NEW</span> <small><span id="ver"></span> · Rev 3 · paper money</small></h1>
-  <div class="sub">One strategy, four time horizons. Each batch goes long the 8 weakest and short the 8 strongest coins (24h change) with $250 margin per leg, starts at 4x, and every entry carries a <b>$25 stop</b> (10% of margin). A stopped leg reopens on the same side at 5x, then 6x, then 7x, then it is done. Whatever is left open is closed at the horizon. <a href="/research.html">Research dashboard</a> · <a href="/">Public summary</a></div>
-  <div class="note">Back-test (42 overlapping 24h batches, one falling market) favoured this rule. The weekly, monthly and yearly versions are untested guesses. A $25 stop is a tight stop over a long horizon, so expect legs to finish early and the long horizons to behave very differently from the daily one. Funding payments are booked when each entry closes (open entries show price and fees only). Paper only, nothing here places real orders.</div>
+  <div class="sub">Rev 3 (daily). Each batch goes long the 5 weakest and short the 5 strongest top-50 coins (24h change, minimum $10M volume) with $100 margin per leg, starts at 4x, and every entry carries a <b>$10 stop</b> (10% of margin). The bank is $1,000. A stopped leg reopens on the same side at 5x, then 6x, then 7x, then it is done. Whatever is left open is closed at the horizon. <a href="/research.html">Research dashboard</a> · <a href="/">Public summary</a></div>
+  <div class="note">Back-test (42 overlapping 24h batches, one falling market) favoured this rule. Weekly, monthly and yearly versions are stopped. Funding payments are booked when each entry closes (open entries show price and fees only). Paper only, nothing here places real orders.</div>
   <div class="tabs" id="tabs" role="tablist"></div>
   <div id="body"><div class="card mut">loading…</div></div>
 </div>
@@ -48,8 +48,8 @@
 (function () {
   var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
   var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
-  var FEE = 0.00055, MARGIN = 250, LEGS = 16;
-  var H = [['r3d', 'Daily', '24 hours'], ['r3w', 'Weekly', '7 days'], ['r3m', 'Monthly', '30 days'], ['r3y', 'Yearly', '365 days']];
+  var FEE = 0.00055, MARGIN = 100, LEGS = 10;
+  var H = [['r3d', 'Daily', '24 hours']]; /* weekly, monthly, yearly retired in the $1,000 reset */
   var cur = 'r3d', P = [], px = {}, tabSaved = null;
   try { tabSaved = localStorage.getItem('ap-horizon'); } catch (e) {}
   if (tabSaved && H.some(function (h) { return h[0] === tabSaved; })) cur = tabSaved;

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="version" content="ap-v1.30.6">
+<meta name="version" content="ap-v1.31">
 <title>Autopilot</title>
 <style>
   :root { --bg:#0b0f14; --card:#121922; --card2:#0f151d; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --up:#3ddc97; --down:#ff6b6b; --acc:#6aa9ff; --warn:#f2c14e; --s1:#3987e5; --s2:#d95926; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
@@ -49,7 +49,7 @@
 <style>.newrow td{background:rgba(245,166,35,.18)}.pos td{background:rgba(61,220,151,.14)!important}.pos td:first-child{box-shadow:inset 4px 0 var(--up)!important}.newrow td:first-child{box-shadow:inset 4px 0 #f5a623}.newb{background:#f5a623;color:#111;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle}</style></head>
 <body>
 <div class="wrap">
-  <h1>AUTOPILOT <small><span id="ver">ap-v1.30.6</span> · top 50 coins · paper money · decided by Claude · runs on the server</small></h1>
+  <h1>AUTOPILOT <small><span id="ver">ap-v1.31</span> · top 50 coins · paper money · decided by Claude · runs on the server</small></h1>
   <div class="sub" id="status">loading…</div>
   <div class="kpis" id="kpis"></div>
   <div class="card" id="cmp" style="margin-bottom:10px"></div>
@@ -71,7 +71,7 @@
   fetch('/version.json?t=' + Date.now()).then(function (r) { return r.json(); }).then(function (v) { var e = document.getElementById('ver'); if (e && v.version) e.textContent = 'ap-v' + v.version; }).catch(function () {});
   var URL = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
   var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
-  var START = 250, sortKey = 'edge', sortDir = -1, onlyTrades = false, D = null;
+  var BANK = 1000, START = 250, sortKey = 'edge', sortDir = -1, onlyTrades = false, D = null;
   function get(t, q) { return fetch(URL + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
@@ -110,7 +110,7 @@
   function inAI(c) { return AIM === '' ? c.indexOf(':') < 0 : c.slice(-2) === AIM; }
   /* total value of a desk = $250 per coin + closed P&L + what its open trades are worth right now (minus the entry fee, same as the chart) */
   function worth(test) {
-    var list = D.pos.filter(function (p) { return test(p.coin) && p.opened_at >= RACE_START; }), base = START * D.rows.length, real = 0, unr = 0;
+    var list = D.pos.filter(function (p) { return test(p.coin) && p.opened_at >= RACE_START; }), base = BANK, real = 0, unr = 0;
     list.forEach(function (p) {
       if (p.status === 'closed') { real += +p.pnl || 0; return; }
       var lt = D.latest[p.coin.split(':')[0]], n = +p.notional, e = +p.entry_price; if (!lt || !isFinite(n) || !isFinite(e) || !e) return;
@@ -150,7 +150,8 @@ var y2a = stats(PS().filter(function (p) { return /:revm$/.test(p.coin); })), y2
       var re = new RegExp(':' + d[0] + '$'), a = stats(PS().filter(function (p) { return re.test(p.coin); })), b = worth(function (c) { return re.test(c); });
       rowsH += '<tr class="newrow"><td><b>' + d[1] + '</b> <span class="newb">NEW</span> <span class="mut">' + d[2] + '</span></td><td class="num">' + a.trades + '</td><td class="num">' + (a.trades ? Math.round(a.w / a.trades * 100) + '%' : '–') + '</td><td class="num ' + cls(a.pnl) + '">' + money(a.pnl) + '</td><td class="num">$' + a.fees.toFixed(2) + '</td><td class="num">' + PS().filter(function (p) { return p.status === 'open' && re.test(p.coin); }).length + '</td><td class="num ' + cls(b.unr) + '">' + money(b.unr) + '</td><td class="num"><b>$' + b.total.toFixed(2) + '</b> <span class="' + cls(b.pct) + '">' + (b.pct >= 0 ? '+' : '') + b.pct.toFixed(2) + '%</span></td></tr>';
     });
-    $('cmp').innerHTML = '<div class="scroll"><table><tr><th>Desk (all use the same Claude calls)</th><th class="num">Closed</th><th class="num">Win</th><th class="num">P&amp;L</th><th class="num">Fees</th><th class="num">Open</th><th class="num">Open P&amp;L</th><th class="num">Total value (start $' + (START * D.rows.length) + ')</th></tr>' + rowsH + '</table></div>';
+    rowsH = rowsH.split('<tr').filter(function (r) { return /<b>(Neutral Rev|Neutral Rev 2|Neutral Rev 2 limit|Rev 3 daily)<\/b>/.test(r); }).map(function (r) { return '<tr' + r; }).join('');
+    $('cmp').innerHTML = '<div class="scroll"><table><tr><th>Desk ($1,000 bank each, $100 per leg)</th><th class="num">Closed</th><th class="num">Win</th><th class="num">P&amp;L</th><th class="num">Fees</th><th class="num">Open</th><th class="num">Open P&amp;L</th><th class="num">Total value (start $' + BANK + ')</th></tr>' + rowsH + '</table></div>';
     Array.prototype.forEach.call($('cmp').querySelectorAll('table tr'), function (tr) { var sp = tr.lastElementChild && tr.lastElementChild.querySelector('span.up'); if (sp) tr.classList.add('pos'); }); /* green = desk is in profit */
 
     /* Neutral Reversal: one row per 24h batch, so daily P/L is on record */
