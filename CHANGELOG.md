@@ -35,6 +35,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.37.2
+- Saga page: animated story with all 10 coins of the batch (live data)
+
 ## v1.37.1
 - Stories page: animated bear (short BNB) and bull (long FIL)
 

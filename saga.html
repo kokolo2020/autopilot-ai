@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot Short Story</title>
+<style>
+  :root { --bg:#0b0f14; --card:#121922; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --acc:#6aa9ff; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f4f6f9; --card:#fff; --line:#dde3ea; --text:#17202b; --mut:#5b6b7d; --acc:#2c6fd6; } }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:820px; margin:0 auto; padding:16px; } h1 { font-size:18px; margin:0 0 4px; letter-spacing:.05em; } .sub { color:var(--mut); font-size:12px; margin-bottom:12px; } a { color:var(--acc); }
+  canvas { width:100%; height:auto; display:block; border:1px solid var(--line); border-radius:16px; background:var(--card); }
+  .row { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center; } .row button { font:600 13px system-ui; border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:999px; padding:6px 14px; cursor:pointer; }
+  .fine { color:var(--mut); font-size:12px; margin-top:12px; line-height:1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>THE GREAT BATCH SAGA <small style="color:var(--mut);font-weight:500;font-size:12px;letter-spacing:0">· all 10 coins of Neutral Rev batch 1 · <a href="/story.html">Short stories</a> · <a href="/arena.html">Tide Room</a></small></h1>
+  <div class="sub" id="src">Bear and bull each picked five coins. Here is how it is going. Paper money.</div>
+  <canvas id="c" width="1000" height="700" aria-label="Animation of all ten coins of batch 1"></canvas>
+  <div class="row"><button id="re" type="button">Replay</button><button id="sp" type="button">Pause</button></div>
+  <div class="fine" id="fine"></div>
+</div>
+<script>
+(function () {
+  var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
+  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
+  var cv = document.getElementById('c'), x = cv.getContext('2d'), W = 1000, H = 700, FEE = 0.00055, SC = { dir: -1 };
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var t0 = performance.now(), paused = false, off = 0, LOOP = 22;
+  var css = function (v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); };
+  var ease = function (a) { a = Math.max(0, Math.min(1, a)); return a * a * (3 - 2 * a); };
+  var seg = function (t, a, b) { return ease((t - a) / (b - a)); };
+  var money = function (n) { return (n < 0 ? '-' : '+') + '$' + Math.abs(n).toFixed(2); };
+  /* fallback = the real batch 1 table from 18 Oct 13:35 Bangkok; replaced by live data when the page can reach the database */
+  var LEGS = [['XRP', 'SHORT', 1.2954, 1.2961], ['ETH', 'SHORT', 2414, 2411.01], ['BNB', 'SHORT', 720.1, 721.4], ['BTC', 'SHORT', 81742, 81685.1], ['HBAR', 'SHORT', 0.08582, 0.08698], ['TIA', 'LONG', 0.6284, 0.6265], ['FIL', 'LONG', 1.0543, 1.0483], ['OP', 'LONG', 0.12705, 0.12616], ['DOT', 'LONG', 1.1018, 1.1017], ['WLD', 'LONG', 0.4894, 0.4891]].map(function (l) { return { c: l[0], side: l[1], e: l[2], p: l[3], n: 500 }; });
+  var live = false;
+  function get(t, q) { return fetch(URL_ + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
+  function load() {
+    get('ap_positions', 'select=coin,side,status,notional,entry_price,max_hold_until&coin=like.*:rev&status=eq.open&order=opened_at.desc&limit=40').then(function (pos) {
+      if (pos.length < 4) return; var dl = new Date(pos[0].max_hold_until).getTime(); pos = pos.filter(function (p) { return Math.abs(new Date(p.max_hold_until).getTime() - dl) < 900000; });
+      return get('ap_samples', 'select=coin,price,ts&order=ts.desc&limit=400').then(function (sm) {
+        var px = {}; sm.forEach(function (s) { if (px[s.coin] == null) px[s.coin] = +s.price; });
+        var L = pos.map(function (p) { var c = p.coin.split(':')[0]; return { c: c, side: p.side, e: +p.entry_price, p: px[c], n: +p.notional }; }).filter(function (l) { return l.p; });
+        if (L.length >= 4) { L.sort(function (a, b) { return (a.side === 'SHORT' ? 0 : 1) - (b.side === 'SHORT' ? 0 : 1); }); LEGS = L; live = true; setText(); }
+      });
+    }).catch(function () {});
+  }
+  function lp(l) { var d = l.side === 'LONG' ? 1 : -1; return l.n * d * (l.p - l.e) / l.e; }
+  function setText() {
+    var g = LEGS.reduce(function (s, l) { return s + lp(l); }, 0), f = LEGS.reduce(function (s, l) { return s + l.n * FEE * 2; }, 0);
+    document.getElementById('src').textContent = live ? 'Live data from the current Neutral Rev batch. Reload to refresh. Paper money.' : 'Bear and bull each picked five coins. The numbers are from batch 1 on 18 Oct, 13:35 Bangkok. Paper money.';
+    document.getElementById('fine').textContent = 'Each coin is a $500 position (5x on $100). Shorts win when the coin falls (it sinks on a weight), longs win when it rises (it floats on balloons). Before fees the batch is ' + money(g) + '; both fees on ten trades take $' + f.toFixed(2) + ', so it is ' + money(g - f) + '. It closes at 20:00 Bangkok.';
+  }
+  function bear(cx, cy, mood, sweat, t) {
+    var bull = SC.dir > 0; /* mood 0 smug .. 1 panic */
+    var bob = Math.sin(t * 2) * 2, y = cy + bob;
+    if (bull) { x.fillStyle = '#efe6d8'; x.strokeStyle = '#8a7b66'; x.lineWidth = 3;[-1, 1].forEach(function (d) { x.beginPath(); x.moveTo(cx + d * 40, cy - 40); x.quadraticCurveTo(cx + d * 100, cy - 60, cx + d * 82, cy - 118); x.quadraticCurveTo(cx + d * 66, cy - 80, cx + d * 40, cy - 56); x.closePath(); x.fill(); x.stroke(); }); }
+    x.fillStyle = bull ? '#4a4f5c' : '#a0683c'; [[-52, -62], [52, -62]].forEach(function (e) { x.beginPath(); x.arc(cx + e[0], y + e[1], 20, 0, 7); x.fill(); });
+    x.fillStyle = '#e8b98a'; [[-52, -62], [52, -62]].forEach(function (e) { x.beginPath(); x.arc(cx + e[0], y + e[1], 10, 0, 7); x.fill(); });
+    x.fillStyle = bull ? '#5d6370' : '#b8794a'; x.beginPath(); x.ellipse(cx, y + 78, 62, 70, 0, 0, 7); x.fill(); /* body */
+    x.fillStyle = '#e8b98a'; x.beginPath(); x.ellipse(cx, y + 90, 36, 44, 0, 0, 7); x.fill();
+    x.fillStyle = bull ? '#5d6370' : '#b8794a'; x.beginPath(); x.arc(cx, y, 66, 0, 7); x.fill(); /* head */
+    x.fillStyle = '#e8b98a'; x.beginPath(); x.ellipse(cx, y + 20, 30, 24, 0, 0, 7); x.fill();
+    x.fillStyle = '#2b1d14'; x.beginPath(); x.ellipse(cx, y + 10, 9, 6, 0, 0, 7); x.fill(); if (bull) { x.strokeStyle = '#f3ba2f'; x.lineWidth = 4; x.beginPath(); x.arc(cx, y + 30, 11, 0, Math.PI); x.stroke(); }
+    var er = 8 + mood * 6, ey = y - 14, blink = Math.sin(t * 1.3) > 0.97 ? 0.2 : 1;
+    [-24, 24].forEach(function (dx) { x.fillStyle = '#fff'; x.beginPath(); x.ellipse(cx + dx, ey, er + 4, (er + 4) * blink, 0, 0, 7); x.fill(); x.fillStyle = '#1a1a1a'; x.beginPath(); x.arc(cx + dx + (1 - mood) * 3, ey + mood * 2, Math.max(2, 5 - mood * 2), 0, 7); x.fill(); });
+    x.strokeStyle = '#2b1d14'; x.lineWidth = 4; x.lineCap = 'round'; x.beginPath();
+    if (mood < 0.35) { x.arc(cx, y + 28, 16, 0.15 * Math.PI, 0.85 * Math.PI); } /* smirk */
+    else { x.moveTo(cx - 14, y + 38 - mood * 4); x.quadraticCurveTo(cx, y + 30 + mood * 6, cx + 14, y + 38 - mood * 4); } x.stroke();
+    x.beginPath(); x.moveTo(cx - 40, ey - 18 - mood * 6); x.lineTo(cx - 12, ey - 24 + (mood > 0.5 ? 8 : 0)); x.moveTo(cx + 40, ey - 18 - mood * 6); x.lineTo(cx + 12, ey - 24 + (mood > 0.5 ? 8 : 0)); x.stroke();
+    for (var i = 0; i < Math.round(sweat * 4); i++) { var sy = ((t * 90 + i * 40) % 90); x.fillStyle = '#6aa9ff'; x.globalAlpha = 1 - sy / 90; x.beginPath(); x.ellipse(cx + 70 + (i % 2) * 14, y - 40 + sy, 5, 8, 0, 0, 7); x.fill(); x.globalAlpha = 1; }
+  }
+  function balloon(bx, by, col, t, k) { x.strokeStyle = '#8b98a8'; x.lineWidth = 2; x.beginPath(); x.moveTo(bx, by + 30); x.lineTo(bx + Math.sin(t * 2 + k) * 6, by + 85); x.stroke(); x.fillStyle = col; x.beginPath(); x.ellipse(bx, by, 22, 28, 0, 0, 7); x.fill(); x.fillStyle = 'rgba(255,255,255,.35)'; x.beginPath(); x.ellipse(bx - 7, by - 9, 5, 8, 0, 0, 7); x.fill(); }
+  function bubbleText(txt, bx, by, w) { x.font = '700 22px system-ui'; var tw = Math.min(w, x.measureText(txt).width + 28); x.fillStyle = '#fff'; x.strokeStyle = '#111'; x.lineWidth = 3; x.beginPath(); x.roundRect ? x.roundRect(bx, by, tw, 44, 14) : x.rect(bx, by, tw, 44); x.fill(); x.stroke(); x.fillStyle = '#111'; x.fillText(txt, bx + 14, by + 30); }
+
+  function coinFace(cx, cy, r, label, mood, t) {
+    x.fillStyle = '#f3ba2f'; x.beginPath(); x.arc(cx, cy, r, 0, 7); x.fill(); x.strokeStyle = '#b8860b'; x.lineWidth = 3; x.stroke();
+    x.fillStyle = '#fff'; [-1, 1].forEach(function (d) { x.beginPath(); x.arc(cx + d * r * 0.34, cy - r * 0.2, r * 0.2, 0, 7); x.fill(); });
+    x.fillStyle = '#222'; [-1, 1].forEach(function (d) { x.beginPath(); x.arc(cx + d * r * 0.34 + mood * 1.5, cy - r * 0.18, r * 0.09, 0, 7); x.fill(); });
+    x.strokeStyle = '#222'; x.lineWidth = 3; x.lineCap = 'round'; x.beginPath();
+    if (mood >= 0) x.arc(cx, cy + r * 0.02, r * 0.32, 0.15 * Math.PI, 0.85 * Math.PI); else x.arc(cx, cy + r * 0.55, r * 0.3, 1.15 * Math.PI, 1.85 * Math.PI); x.stroke();
+    x.fillStyle = '#7a5a00'; x.font = '800 ' + Math.round(r * 0.46) + 'px ui-monospace,monospace'; x.textAlign = 'center'; x.fillText(label, cx, cy + r * 0.82); x.textAlign = 'left';
+  }
+  function frame(ts) {
+    var t = paused ? off : ((ts - t0) / 1000) % LOOP; if (!paused) off = t; var txt = css('--text'), mut = css('--mut');
+    x.clearRect(0, 0, W, H);
+    var sky = x.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, 'rgba(106,169,255,.10)'); sky.addColorStop(1, 'rgba(106,169,255,0)'); x.fillStyle = sky; x.fillRect(0, 0, W, H);
+    var n = LEGS.length, yE = 330, colW = (W - 80) / n, maxM = Math.max.apply(null, LEGS.map(function (l) { return Math.abs(l.p - l.e) / l.e; })) || 0.001;
+    var mv = seg(t, 3.5, 9), teamS = 0, teamL = 0, tot = 0;
+    LEGS.forEach(function (l) { var v = lp(l) * mv; tot += v; if (l.side === 'SHORT') teamS += v; else teamL += v; });
+    /* bear and bull, mood follows their team */
+    var moodOf = function (v) { return v >= 0 ? Math.max(0, 0.25 - v / 4) : Math.min(1, 0.4 + Math.abs(v) / 3); };
+    x.save(); x.translate(10, 0); x.scale(0.62, 0.62); SC.dir = -1; bear(130, 120, moodOf(teamS), Math.min(1, Math.max(0, -teamS / 2)) * mv, t); x.restore();
+    x.save(); x.translate(W - 10, 0); x.scale(-0.62, 0.62); x.translate(0, 0); SC.dir = 1; bear(130, 120, moodOf(teamL), Math.min(1, Math.max(0, -teamL / 2)) * mv, t); x.restore();
+    x.fillStyle = txt; x.font = '700 18px system-ui'; x.fillText('BEAR (5 shorts)', 20, 200); x.fillStyle = teamS < -0.005 ? '#ff6b6b' : '#3ddc97'; x.font = '800 24px ui-monospace,monospace'; x.fillText(money(teamS), 20, 228);
+    x.textAlign = 'right'; x.fillStyle = txt; x.font = '700 18px system-ui'; x.fillText('BULL (5 longs)', W - 20, 200); x.fillStyle = teamL < -0.005 ? '#ff6b6b' : '#3ddc97'; x.font = '800 24px ui-monospace,monospace'; x.fillText(money(teamL), W - 20, 228); x.textAlign = 'left';
+    /* the entry line and the ten coins */
+    x.strokeStyle = mut; x.lineWidth = 2; x.setLineDash([8, 7]); x.beginPath(); x.moveTo(30, yE); x.lineTo(W - 30, yE); x.stroke(); x.setLineDash([]); x.fillStyle = mut; x.font = '600 14px ui-monospace,monospace'; x.fillText('entry prices', W - 130, yE - 8);
+    LEGS.forEach(function (l, i) {
+      var cx = 40 + colW * (i + 0.5), pct = (l.p - l.e) / l.e, dy = -(pct / maxM) * 110 * mv, cy = yE + 40 + dy, win = lp(l) >= 0, r = 26;
+      if (t < 3.5) cy = yE + 40 + Math.sin(t * 2 + i) * 3;
+      if (pct * mv > 0.00001 && t > 3.5) { [-1, 1].forEach(function (d, k) { balloon(cx + d * 12, cy - 64 - k * 4, k ? '#6aa9ff' : '#ff6b6b', t, i + k); }); }
+      else if (pct * mv < -0.00001 && t > 3.5) { x.fillStyle = '#555c6b'; x.fillRect(cx - 22, cy - 50, 44, 11); x.fillStyle = '#fff'; x.font = '800 11px ui-monospace,monospace'; x.fillText('DIP', cx - 10, cy - 41); }
+      coinFace(cx, cy, r, l.c.length > 4 ? l.c.slice(0, 4) : l.c, win ? 1 : -1, t);
+      var v = lp(l) * mv; x.textAlign = 'center'; x.font = '800 15px ui-monospace,monospace'; x.fillStyle = v >= 0 ? '#3ddc97' : '#ff6b6b'; x.fillText(money(v), cx, yE + 200); x.fillStyle = mut; x.font = '600 12px system-ui'; x.fillText(l.side === 'SHORT' ? 'bear' : 'bull', cx, yE + 218); x.textAlign = 'left';
+    });
+    /* narration */
+    if (t < 3.5) bubbleText('Bear and bull place their bets...', 280, 70, 460);
+    else if (t < 9) bubbleText('Prices move. Everyone is very calm.', 280, 70, 460);
+    else if (t < 13) bubbleText(tot >= 0 ? 'So far so good.' : 'Some coins did not read the plan.', 300, 70, 420);
+    /* fee gremlin takes a bite */
+    var feeTot = LEGS.reduce(function (s, l) { return s + l.n * FEE * 2; }, 0), fee = t > 12 ? feeTot * seg(t, 12, 14.5) : 0;
+    if (t > 11.5 && t < 20) { var gx = 360 + (1 - seg(t, 11.5, 12.5)) * 700, gy = 480 + Math.sin(t * 8) * 4; x.fillStyle = '#7e57c2'; x.beginPath(); x.arc(gx, gy, 28, 0, 7); x.fill(); x.fillStyle = '#fff'; x.beginPath(); x.arc(gx - 9, gy - 6, 6, 0, 7); x.arc(gx + 9, gy - 6, 6, 0, 7); x.fill(); x.fillStyle = '#111'; x.beginPath(); x.arc(gx - 9, gy - 5, 3, 0, 7); x.arc(gx + 9, gy - 5, 3, 0, 7); x.fill(); x.fillRect(gx - 12, gy + 6, 24, 5); x.fillStyle = txt; x.font = '700 18px system-ui'; x.fillText('fees nibble ' + money(-fee), gx + 38, gy + 6); }
+    /* scoreboard */
+    var net = tot - fee; x.font = '800 54px ui-monospace,monospace'; x.fillStyle = net < -0.005 ? '#ff6b6b' : net > 0.005 ? '#3ddc97' : txt; x.textAlign = 'center'; x.fillText(money(net), W / 2, 640); x.font = '600 18px system-ui'; x.fillStyle = mut; x.fillText(t > 14.5 ? 'batch total after fees' : t > 9 ? 'batch total before fees' : 'batch total', W / 2, 668); x.textAlign = 'left';
+    if (t > 16 && t < 21.8) bubbleText(net < 0 ? 'Closing bell at 8pm. Anything can happen.' : 'Closing bell at 8pm. Nobody touch anything.', 220, 110, 640);
+    if (!paused && !reduce) requestAnimationFrame(frame);
+  }
+  document.getElementById('re').onclick = function () { t0 = performance.now(); paused = false; off = 0; document.getElementById('sp').textContent = 'Pause'; requestAnimationFrame(frame); };
+  document.getElementById('sp').onclick = function () { paused = !paused; this.textContent = paused ? 'Play' : 'Pause'; if (!paused) { t0 = performance.now() - off * 1000; requestAnimationFrame(frame); } };
+  if (reduce) { off = 17; paused = true; document.getElementById('sp').textContent = 'Play'; }
+  setText(); load(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
