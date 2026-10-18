@@ -40,6 +40,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.37.7
+- Saga: each coin lane scaled to its own stop so the graph reads clearly; no label overlaps; legend line
+
 ## v1.37.6
 - Saga: premium gold styling, sunglasses and money rain on winners, coin quips, breaking-news ticker, verdict stamp
 

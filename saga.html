@@ -25,7 +25,7 @@
 <body>
 <div class="wrap">
   <h1>THE GREAT BATCH SAGA <small style="color:var(--mut);font-weight:500;font-size:12px;letter-spacing:0">· all 10 coins of Neutral Rev batch 1 · <a href="/story.html">Short stories</a> · <a href="/arena.html">Tide Room</a></small></h1>
-  <div class="sub" id="src">Bear and bull each picked five coins. Here is how it is going. Paper money.</div>
+  <div class="sub" id="src">Bear and bull each picked five coins. Red line = that coin's stop. The closer a coin slides to it, the more trouble. Paper money.</div>
   <canvas id="c" width="1000" height="700" aria-label="Animation of all ten coins of batch 1"></canvas>
   <div class="row" id="chips"></div>
   <div class="row"><button id="re" type="button">Replay</button><button id="sp" type="button">Pause</button></div>
@@ -115,7 +115,7 @@
     var sky = x.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, 'rgba(106,169,255,.10)'); sky.addColorStop(1, 'rgba(106,169,255,0)'); x.fillStyle = sky; x.fillRect(0, 0, W, H);
     for (var si = 0; si < 40; si++) { var sx = (si * 197 % W), sy = (si * 83 % 300) + 20, tw = 0.25 + 0.25 * Math.sin(t * 2 + si); x.fillStyle = 'rgba(255,240,200,' + tw + ')'; x.fillRect(sx, sy, 2, 2); }
     var vg = x.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.35)'); x.fillStyle = vg; x.fillRect(0, 0, W, H);
-    var n = LEGS.length, yE = 370, colW = (W - 80) / n, maxM = Math.max.apply(null, LEGS.map(function (l) { return Math.max(Math.abs(l.p - l.e) / l.e, l.sl ? Math.abs(l.sl - l.e) / l.e : 0); })) || 0.001, K = 130;
+    var n = LEGS.length, yE = 360, colW = (W - 80) / n, maxM = Math.max.apply(null, LEGS.map(function (l) { return Math.abs(l.p - l.e) / l.e; })) || 0.001, K = 80;
     var mv = seg(t, 3.5, 9), teamS = 0, teamL = 0, tot = 0;
     LEGS.forEach(function (l) { var v = lp(l) * mv; tot += v; if (l.side === 'SHORT') teamS += v; else teamL += v; });
     /* bear and bull, mood follows their team */
@@ -128,11 +128,11 @@
     x.strokeStyle = mut; x.lineWidth = 2; x.setLineDash([8, 7]); x.beginPath(); x.moveTo(30, yE); x.lineTo(W - 30, yE); x.stroke(); x.setLineDash([]); x.fillStyle = mut; x.font = '600 14px ui-monospace,monospace'; x.fillText('entry prices', W - 130, yE - 8);
     var danger = [], stopped = [];
     LEGS.forEach(function (l, i) {
-      var cx = 40 + colW * (i + 0.5), pct = (l.p - l.e) / l.e, dy = -(pct / maxM) * K * mv, cy = yE + dy, win = lp(l) >= 0, r = 26, pg = prog(l) * mv, st = l.stopped && mv >= 0.999;
+      var cx = 40 + colW * (i + 0.5), pct = (l.p - l.e) / l.e, mm = l.sl ? Math.abs(l.sl - l.e) / l.e : maxM, dy = Math.max(-K * 1.2, Math.min(K * 1.2, -(pct / mm) * K * mv)), cy = yE + dy, win = lp(l) >= 0, r = 26, pg = prog(l) * mv, st = l.stopped && mv >= 0.999;
       if (t < 3.5) cy = yE + Math.sin(t * 2 + i) * 3;
-      if (l.stopped && l.exit) { var ex = -((l.exit - l.e) / l.e / maxM) * K * mv; cy = yE + Math.max(-K, Math.min(K, ex)); }
+      if (l.stopped && l.exit) { var ex = -((l.exit - l.e) / l.e / mm) * K * mv; cy = yE + Math.max(-K, Math.min(K, ex)); }
       if (l.sl) { /* the stop lane: a red zone from entry to the stop, with a bold stop line and flag at the end */
-        var sd = -((l.sl - l.e) / l.e / maxM) * K, ys = yE + sd, lx = cx - colW * 0.46, lw = colW * 0.92, hot = Math.max(0, prog(l) * mv), flash = hot > 0.55 ? 0.5 + 0.5 * Math.sin(t * 9) : 0;
+        var sd = -((l.sl - l.e) / l.e / mm) * K, ys = yE + sd, lx = cx - colW * 0.46, lw = colW * 0.92, hot = Math.max(0, prog(l) * mv), flash = hot > 0.55 ? 0.5 + 0.5 * Math.sin(t * 9) : 0;
         var gr = x.createLinearGradient(0, yE, 0, ys); gr.addColorStop(0, 'rgba(255,59,59,0)'); gr.addColorStop(1, 'rgba(255,59,59,' + (0.28 + 0.3 * hot) + ')'); x.fillStyle = gr; x.fillRect(lx, Math.min(yE, ys), lw, Math.abs(sd));
         x.strokeStyle = '#ff3b3b'; x.lineWidth = 5 + flash * 3; x.shadowColor = '#ff3b3b'; x.shadowBlur = 8 + flash * 14; x.beginPath(); x.moveTo(lx, ys); x.lineTo(lx + lw, ys); x.stroke(); x.shadowBlur = 0;
         x.fillStyle = '#ff3b3b'; var fy = sd < 0 ? ys - 17 : ys + 3; x.fillRect(lx, fy, 38, 14); x.beginPath(); x.moveTo(lx + 38, fy); x.lineTo(lx + 46, fy + 7); x.lineTo(lx + 38, fy + 14); x.fill(); x.fillStyle = '#fff'; x.font = '800 11px ui-monospace,monospace'; x.fillText('STOP', lx + 4, fy + 11);
