@@ -36,6 +36,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.37.3
+- Links to Tide Room, Batch tracker, Stories and Saga from the research and public pages
+
 ## v1.37.2
 - Saga page: animated story with all 10 coins of the batch (live data)
 
