@@ -22,7 +22,7 @@
   <div class="cards" id="cards"></div>
   <div class="scroll"><table id="t"></table></div>
   <p class="mut" id="miss"></p>
-  <p class="mut">20 coins you chose, $250 margin each at 3x on OKX perpetuals ($750 per position, $5,000 in total), all long, opened once and held with no daily close. A leg is closed as "liquidated" at -32%. P&amp;L is the price move on the $750 position, before fees and funding (both are booked when a leg closes). Paper money. <a href="/research">Back to research</a> · <a href="/regime.html">Market regimes</a></p>
+  <p class="mut">20 coins you chose, $250 margin each at 3x on OKX perpetuals ($750 per position, $5,000 in total), all long, opened once and held with no daily close. If a coin falls 18% below your entry, $100 more margin at 3x is added once (shown as its own line). A leg is closed as "liquidated" at -32%. P&amp;L is the price move on the $750 position, before fees and funding (both are booked when a leg closes). Paper money. <a href="/research">Back to research</a> · <a href="/regime.html">Market regimes</a></p>
 </div>
 <script>
 (function () {
@@ -41,7 +41,7 @@
     $('cards').innerHTML = [['Open P&L', '<span class="' + cls(sum) + '">' + money(sum) + '</span>'], ['Margin value', '$' + (margin + sum).toFixed(2)], ['Return on margin', '<span class="' + cls(sum) + '">' + pct(margin ? sum / margin * 100 : 0) + '</span>'], ['In profit', win + ' / ' + rows.length], ['Best', best ? best.c + ' ' + money(best.pnl) : '–'], ['Worst', worst ? worst.c + ' ' + money(worst.pnl) : '–']].map(function (x) { return '<div class="card"><small>' + x[0] + '</small><b>' + x[1] + '</b></div>'; }).join('');
     var mx = Math.max.apply(null, rows.map(function (r) { return Math.abs(r.pnl); }).concat([1]));
     $('t').innerHTML = '<tr><th>Coin</th><th>Entry</th><th>Last</th><th>Move</th><th>P&amp;L</th><th></th><th>Return on $250</th></tr>' + (rows.length ? rows.map(function (r) {
-      return '<tr><td>' + r.c + (r.closed ? ' <span class="mut">(' + (r.why || 'closed') + ')</span>' : '') + '</td><td>' + r.e + '</td><td>' + (r.last ? +r.last.toPrecision(6) : '–') + '</td><td class="' + cls(r.chg || 0) + '">' + (r.chg == null ? '–' : pct(r.chg)) + '</td><td class="' + cls(r.pnl) + '">' + money(r.pnl) + '</td><td style="text-align:left"><span class="bar" style="width:' + Math.round(Math.abs(r.pnl) / mx * 70) + 'px;background:var(--' + (r.pnl < 0 ? 'dn' : 'up') + ')"></span></td><td class="' + cls(r.pnl) + '">' + pct(r.pnl / (r.n / 3) * 100) + '</td></tr>';
+      return '<tr><td>' + r.c + (r.closed ? ' <span class="mut">(' + (r.why || 'closed') + ')</span>' : r.why === 'pick-add' ? ' <span class="mut">(add-on, \$100)</span>' : '') + '</td><td>' + r.e + '</td><td>' + (r.last ? +r.last.toPrecision(6) : '–') + '</td><td class="' + cls(r.chg || 0) + '">' + (r.chg == null ? '–' : pct(r.chg)) + '</td><td class="' + cls(r.pnl) + '">' + money(r.pnl) + '</td><td style="text-align:left"><span class="bar" style="width:' + Math.round(Math.abs(r.pnl) / mx * 70) + 'px;background:var(--' + (r.pnl < 0 ? 'dn' : 'up') + ')"></span></td><td class="' + cls(r.pnl) + '">' + pct(r.pnl / (r.n / 3) * 100) + '</td></tr>';
     }).join('') : '<tr><td colspan="7" class="mut">No positions yet. They open on the next 5-minute tick after the desk goes live.</td></tr>');
     var have = {}; pos.forEach(function (p) { have[p.coin.split(':')[0]] = 1; });
     var miss = WANT.filter(function (c) { return !have[c]; });

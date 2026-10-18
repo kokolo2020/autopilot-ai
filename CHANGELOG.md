@@ -47,6 +47,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.39.1
+- My picks: add $100 margin at 3x when a coin falls 18% below entry (once per coin)
+
 ## v1.39
 - New section: My picks (Koko's 20 coins, $250 margin each at 3x long, held) with its own page
 
