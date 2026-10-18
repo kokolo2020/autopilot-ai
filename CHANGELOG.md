@@ -26,6 +26,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.31.1
+- Research page labels for the reset
+
 ## v1.31
 - Reset: ,000 bank per strategy, 00 per leg, 5+5 legs, 4 desks only, top-50 + min volume
 
