@@ -640,9 +640,8 @@ export function revVariantLegs(rk, desk) {
 /* :spl Spot long-only: buy the 5 weakest top-50 coins ($200 each, no leverage) and sell at 20:00 Bangkok. :spm Spot margin Neutral Rev: 5 weakest bought, 5 strongest borrowed and sold, $100 each, same close. */
 export async function spotDeskTick(db, rows, openPos, ctl, desk) {
   const out = [], sfx = ':' + desk;
-  if (desk === 'revs') { const by = {}; for (const p of openPos) (by[p.coin] = by[p.coin] || []).push(p); for (const g of Object.values(by)) { const r = rows.find((x) => x.coin === g[0].coin.split(':')[0]); if (r) out.push(...await revsManage(db, g, r.m).catch((e) => [g[0].coin + ' error ' + String(e.message || e).slice(0, 60)])); } }
-  else for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
-  if (desk === 'revs' ? (await db.select('ap_positions', 'select=id&status=eq.open&coin=like.*:revs&limit=1').catch(() => [1])).length : openPos.length) return out;
+  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
+  if (openPos.length) return out;
   if (ctlBlocks(ctl, desk, '')) return out;
   const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&order=opened_at.desc&limit=1').catch(() => []))[0];
   if (!batchDue(last, Date.now(), 1)) return out;
@@ -708,8 +707,9 @@ export async function dfcTick(db, ctl, now = Date.now()) {
 
 export async function revVariantTick(db, rows, openPos, ctl, desk) {
   const out = [], sfx = ':' + desk, holdH = desk === 'revw' ? 168 : REV.holdH;
-  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
-  if (openPos.length) return out;
+  if (desk === 'revs') { const by = {}; for (const p of openPos) (by[p.coin] = by[p.coin] || []).push(p); for (const g of Object.values(by)) { const r = rows.find((x) => x.coin === g[0].coin.split(':')[0]); if (r) out.push(...await revsManage(db, g, r.m).catch((e) => [g[0].coin + ' error ' + String(e.message || e).slice(0, 60)])); } }
+  else for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
+  if (desk === 'revs' ? (await db.select('ap_positions', 'select=id&status=eq.open&coin=like.*:revs&limit=1').catch(() => [1])).length : openPos.length) return out;
   if (ctlBlocks(ctl, desk, '')) return out;
   const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&order=opened_at.desc&limit=1').catch(() => []))[0];
   if (!batchDue(last, Date.now(), holdH / 24)) return out;

@@ -53,6 +53,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.43.1
+- Fix: Neutral Rev scale-out rules were wired into the wrong function, so the desk ran as Neutral Rev with a plain -10% stop (full-size stops). Scale-out now runs as designed
+
 ## v1.43
 - Rev 2 limit now exits at 20:00 with a limit order too (maker fee both ways; stops and resets stay market). My picks: RUNE and CARDS open using OKX spot, Gate.io or MEXC prices since OKX has no perpetual for them
 
