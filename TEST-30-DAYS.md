@@ -20,3 +20,6 @@ Rev 2 and Rev 3 (the $25-stop versions) run alongside. At Day 30 we compare them
 
 ## Status after 2 batches (17 Oct)
 +$737.48 total. Batches positive: 2 of 2. Worst batch: +$265.57. Not enough data to judge.
+
+## Note (18 Oct 2026)
+The first batch 3 (opened 17 Oct 21:31) was polluted by a second runner (old site ai-autopilot99) and by off-list coins, so it is excluded. The test counts the clean batch 3 that opened 18 Oct about 10:40. Batches 1 and 2 stand. Test end moves to about 15 Nov. The old runner's schedule was switched off on 18 Oct.
