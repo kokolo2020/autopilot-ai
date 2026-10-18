@@ -764,6 +764,30 @@ export async function revsManage(db, grp, m) {
   return out;
 }
 
+/* :revx Reverse extremes (paper, Koko's idea). After each 20:00 close, look at the Neutral Rev batch that just closed: its best leg and its worst leg (net pnl) are re-entered with the side REVERSED
+   (best leg flipped, worst leg flipped), $100 margin each at 5x, held to the next 20:00. Two legs a day, so it is a tiny sample: forward test only. */
+export async function revxTick(db, rows, openPos, ctl) {
+  const out = [];
+  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
+  if (openPos.length) return out;
+  if (ctlBlocks(ctl, 'revx', '')) return out;
+  const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*:revx&order=opened_at.desc&limit=1').catch(() => []))[0];
+  if (!batchDue(last, Date.now(), 1)) return out;
+  const prev = await db.select('ap_positions', 'select=coin,side,pnl,closed_at,max_hold_until&status=eq.closed&coin=like.*:rev&order=closed_at.desc&limit=30').catch(() => []);
+  if (!prev.length || Date.now() - new Date(prev[0].closed_at).getTime() > 3 * 3600e3) return out;
+  const ref = prev.filter((x) => x.max_hold_until === prev[0].max_hold_until);
+  if (ref.length < 4) return out;
+  const best = ref.reduce((a, b) => (+b.pnl > +a.pnl ? b : a)), worst = ref.reduce((a, b) => (+b.pnl < +a.pnl ? b : a));
+  if (best.coin === worst.coin) return out;
+  for (const x of [best, worst]) {
+    const base = x.coin.split(':')[0], r = rows.find((y) => y.coin === base); if (!r) continue;
+    const dir = x.side === 'LONG' ? -1 : 1, m = r.m, d = decFor(m.price) + 2, notional = RM * LEV;
+    await db.insert('ap_positions', { coin: base + ':revx', side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * 0.5)).toFixed(d), sl: +(m.price * (1 - dir * 0.5)).toFixed(d), max_hold_until: new Date(nextClose(Date.now(), 1)).toISOString() });
+    out.push('revx opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + base + (x === best ? ' (reversing best leg, was ' : ' (reversing worst leg, was ') + x.side + ' ' + (+x.pnl).toFixed(2) + ')');
+  }
+  return out;
+}
+
 /* ---------- Funding Carry (paper): $5,000 of spot + $5,000 short perpetual at 1x, split over 20 coins ($250 per leg per coin) ----------
    Each slot holds one coin: buy $250 spot and short $250 of the USDT perpetual (1x, so no liquidation risk to speak of). Price moves cancel; the profit is the funding the short receives
    every settlement (00:00, 08:00, 16:00 UTC; some coins settle every 4h) while the rate is positive. Slots are filled with the 20 coins that have the highest positive funding among the top-coin list
@@ -837,7 +861,7 @@ export async function tickAll(env) {
   const pendRes = await Promise.all(pend.map((pp) => { const r = rows.find((x) => x.coin === pp.coin.split(':')[0]); return r ? limitTick(db, pp, r.m).then((x) => { if (x !== 'waiting' && !/:rev/.test(pp.coin)) cnt.m--; return pp.coin + ' ' + x; }).catch(() => null) : null; }));
   for (const p of openAll) if (p.coin.endsWith(':algo') || p.coin.endsWith(':algo2') || p.coin.endsWith(':algo3') || p.coin.endsWith(':algo3b') || p.coin.endsWith(':algoq') || p.coin.endsWith(':algow') || p.coin.endsWith(':algox') || p.coin.endsWith(':algot')) openAlgo[p.coin] = p;
   const openRev = {}; for (const p of openAll) if (p.coin.endsWith(':rev')) openRev[p.coin] = p;
-  const openFlip = openAll.filter((p) => p.coin.endsWith(':flip')), openRevv = openAll.filter((p) => p.coin.endsWith(':revv')), openCap = openAll.filter((p) => p.coin.endsWith(':caprev')), openRevw = openAll.filter((p) => p.coin.endsWith(':revw')), openRev2s = openAll.filter((p) => p.coin.endsWith(':rev2s')), openRevs = openAll.filter((p) => p.coin.endsWith(':revs')), openSpl = openAll.filter((p) => p.coin.endsWith(':spl')), openSpm = openAll.filter((p) => p.coin.endsWith(':spm'));
+  const openFlip = openAll.filter((p) => p.coin.endsWith(':flip')), openRevv = openAll.filter((p) => p.coin.endsWith(':revv')), openCap = openAll.filter((p) => p.coin.endsWith(':caprev')), openRevw = openAll.filter((p) => p.coin.endsWith(':revw')), openRev2s = openAll.filter((p) => p.coin.endsWith(':rev2s')), openRevx = openAll.filter((p) => p.coin.endsWith(':revx')), openRevs = openAll.filter((p) => p.coin.endsWith(':revs')), openSpl = openAll.filter((p) => p.coin.endsWith(':spl')), openSpm = openAll.filter((p) => p.coin.endsWith(':spm'));
   const openRev2 = openAll.filter((p) => p.coin.endsWith(':rev2')), openRevm = openAll.filter((p) => p.coin.endsWith(':revm'));
   const openR3 = Object.fromEntries(Object.keys(REV3.hours).map((k) => [k, openAll.filter((p) => p.coin.endsWith(':' + k))]));
   const openSet = new Set(open.map((p) => p.coin)), closedAlgo = {};
@@ -860,6 +884,7 @@ export async function tickAll(env) {
   const dfcRes = await dfcTick(db, ctl).catch((e) => ['dfc error ' + String(e.message || e).slice(0, 80)]);
   const revwRes = await revVariantTick(db, rows, openRevw, ctl, 'revw').catch((e) => ['revw error ' + String(e.message || e).slice(0, 60)]);
   const rev2sRes = await rev2Tick(db, rows, openRev2s, ctl, 'rev2s').catch((e) => ['rev2s error ' + String(e.message || e).slice(0, 60)]);
+  const revxRes = await revxTick(db, rows, openRevx, ctl).catch((e) => ['revx error ' + String(e.message || e).slice(0, 60)]);
   const revsRes = await revVariantTick(db, rows, openRevs, ctl, 'revs').catch((e) => ['revs error ' + String(e.message || e).slice(0, 60)]);
   const capRes = await revVariantTick(db, rows, openCap, ctl, 'caprev').catch((e) => ['caprev error ' + String(e.message || e).slice(0, 60)]);
   const r3Res = {}; for (const k of Object.keys(REV3.hours)) r3Res[k] = await rev3Tick(db, rows, openR3[k], ctl, k).catch((e) => [k + ' error ' + String(e.message || e).slice(0, 60)]);
@@ -881,7 +906,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, revx: revxRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */

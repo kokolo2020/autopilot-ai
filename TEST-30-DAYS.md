@@ -45,3 +45,6 @@ Same 10 picks as Neutral Rev (5x, $100 margin per leg, 20:00 Bangkok close). All
 
 ## Extra: Rev 2 + winner exit (added 18 Oct)
 Rev 2 exactly as it is (4x, 10% price stop, reopens at 5x/6x/7x), plus the winner exit: at +7% of the $100 margin sell half; the rest closes at +10% or back at +5%. Compare with plain Rev 2.
+
+## Extra: Reverse extremes (added 18 Oct)
+After each 20:00 close, the previous Neutral Rev batch's best and worst legs (by net P&L) are re-entered with the side reversed ($100 margin each, 5x), held to the next 20:00. Two legs a day: a tiny sample, forward test only.

@@ -44,6 +44,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.38.2
+- New extra desk: Reverse extremes (best and worst leg of the last Neutral Rev batch, side reversed)
+
 ## v1.38.1
 - New extra desk: Rev 2 + winner exit (half out at +7%, rest at +10% or back at +5%)
 
