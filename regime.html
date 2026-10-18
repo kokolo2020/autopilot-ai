@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot Market Regimes</title>
+<style>
+  :root { --bg:#0b0f14; --card:#121922; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --acc:#6aa9ff; --up:#3ddc97; --dn:#ff6b6b; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f4f6f9; --card:#fff; --line:#dde3ea; --text:#17202b; --mut:#5b6b7d; --acc:#2c6fd6; --up:#1a8f5f; --dn:#c0392b; } }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:16px; } h1 { font-size:20px; margin:0 0 4px; } h2 { font-size:15px; margin:22px 0 6px; } .sub, .mut { color:var(--mut); font-size:12px; } a { color:var(--acc); }
+  .scroll { overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--card); } table { border-collapse:collapse; width:100%; font-size:13px; white-space:nowrap; }
+  th, td { padding:8px 10px; text-align:right; border-bottom:1px solid var(--line); } th:first-child, td:first-child { text-align:left; } th { color:var(--mut); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  tr:last-child td { border-bottom:0; } .up { color:var(--up); } .dn { color:var(--dn); } .tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:700; } .tag.down { background:rgba(255,107,107,.15); color:var(--dn); } .tag.up { background:rgba(61,220,151,.15); color:var(--up); } .tag.flat { background:rgba(139,152,168,.18); color:var(--mut); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Which desk wins in which market?</h1>
+  <div class="sub" id="st">Loading...</div>
+  <h2>Each 8pm batch: the market, and what every desk made</h2>
+  <div class="scroll"><table id="t"></table></div>
+  <h2>Average per batch by market type</h2>
+  <div class="scroll"><table id="avg"></table></div>
+  <p class="mut">Market move = median change of the 50 coins from the batch open to its 8pm close. Down / Up = beyond 1%, otherwise Flat. Desk numbers are net batch P&amp;L after fees, closed batches only. Plain Neutral Rev is the baseline. A few weeks of days are needed before the averages mean anything. Paper money. <a href="/research">Back to research</a> · <a href="/saga.html">Saga</a></p>
+</div>
+<script>
+(function () {
+  var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
+  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
+  var D = [['rev', 'Neutral Rev'], ['rev2', 'Rev 2'], ['revm', 'Rev 2 limit'], ['caprev', 'Capitulation'], ['r3d', 'Rev 3 daily'], ['r3l', 'Rev 3 low-lev'], ['revs', 'Scale-out'], ['rev2s', 'Rev 2 + win exit'], ['revx', 'Reverse extremes'], ['spl', 'Spot long'], ['spm', 'Spot margin']];
+  var $ = function (i) { return document.getElementById(i); }, money = function (n) { return (n < 0 ? '-' : '+') + '$' + Math.abs(n).toFixed(2); }, pct = function (n) { return (n < 0 ? '' : '+') + n.toFixed(2) + '%'; };
+  function get(t, q) { return fetch(URL_ + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
+  var med = function (a) { a = a.filter(function (x) { return isFinite(x); }).sort(function (x, y) { return x - y; }); return a.length ? a[Math.floor(a.length / 2)] : null; };
+  var bkk = function (ms) { return new Date(ms).toLocaleString('en-GB', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+  function snap(ms) { // one price and change24h per coin from samples within 8 minutes of ms
+    return get('ap_samples', 'select=coin,price,change24h,ts&ts=gte.' + new Date(ms - 8 * 60000).toISOString() + '&ts=lte.' + new Date(ms + 8 * 60000).toISOString() + '&order=ts.desc&limit=400').then(function (r) { var o = {}; r.forEach(function (x) { if (!o[x.coin]) o[x.coin] = x; }); return o; });
+  }
+  get('ap_positions', 'select=coin,pnl,status,max_hold_until&opened_at=gte.2026-10-18T00:00:00Z&coin=like.*:*&order=max_hold_until.asc&limit=3000').then(function (ps) {
+    var days = {}, wanted = {}; D.forEach(function (d) { wanted[d[0]] = 1; });
+    ps.forEach(function (p) { var s = p.coin.split(':')[1]; if (!wanted[s]) return; var b = Math.round(new Date(p.max_hold_until).getTime() / 3600000) * 3600000, o = days[b] = days[b] || { b: b, d: {} }, x = o.d[s] = o.d[s] || { pnl: 0, open: 0, n: 0 }; x.n++; if (p.status === 'closed') x.pnl += +p.pnl; else x.open++; });
+    var list = Object.keys(days).map(function (k) { return days[k]; }).filter(function (o) { return o.b > Date.parse('2026-10-18T12:00:00Z') && o.b <= Date.now() + 24 * 3600000; }).sort(function (a, b) { return a.b - b.b; });
+    return Promise.all(list.map(function (o) { return Promise.all([snap(o.b - 86400000), snap(Math.min(o.b, Date.now()))]).then(function (s) { o.open = s[0]; o.close = s[1]; return o; }); }));
+  }).then(function (list) {
+    var rows = list.map(function (o) {
+      var a = o.open, z = o.close, ch24 = med(Object.keys(a).map(function (c) { return +a[c].change24h; })), mv = med(Object.keys(a).filter(function (c) { return z[c]; }).map(function (c) { return (+z[c].price / +a[c].price - 1) * 100; }));
+      var done = o.b <= Date.now();
+      return { o: o, ch24: ch24, mv: mv, kind: done && mv != null ? (mv < -1 ? 'down' : mv > 1 ? 'up' : 'flat') : null, done: done };
+    });
+    $('t').innerHTML = '<tr><th>Batch closing</th><th>Market 24h at open</th><th>Market move in batch</th><th>Type</th>' + D.map(function (d) { return '<th>' + d[1] + '</th>'; }).join('') + '</tr>' + (rows.length ? rows.map(function (r) {
+      return '<tr><td>' + bkk(r.o.b) + (r.done ? '' : ' <span class="mut">(live)</span>') + '</td><td>' + (r.ch24 == null ? '–' : pct(r.ch24)) + '</td><td class="' + (r.mv == null ? '' : r.mv < 0 ? 'dn' : 'up') + '">' + (r.mv == null ? '–' : pct(r.mv)) + '</td><td>' + (r.kind ? '<span class="tag ' + r.kind + '">' + r.kind + '</span>' : '–') + '</td>' + D.map(function (d) { var x = r.o.d[d[0]]; return '<td class="' + (x && r.done && !x.open ? (x.pnl < 0 ? 'dn' : 'up') : '') + '">' + (!x ? '–' : r.done && !x.open ? money(x.pnl) : '<span class="mut">open</span>') + '</td>'; }).join('') + '</tr>';
+    }).join('') : '<tr><td colspan="' + (4 + D.length) + '" class="mut">No batch yet.</td></tr>');
+    $('avg').innerHTML = '<tr><th>Market type</th><th>Days</th>' + D.map(function (d) { return '<th>' + d[1] + '</th>'; }).join('') + '</tr>' + ['down', 'flat', 'up'].map(function (k) {
+      var rs = rows.filter(function (r) { return r.kind === k; });
+      return '<tr><td><span class="tag ' + k + '">' + k + '</span></td><td>' + rs.length + '</td>' + D.map(function (d) { var v = rs.map(function (r) { return r.o.d[d[0]]; }).filter(function (x) { return x && !x.open; }); if (!v.length) return '<td class="mut">–</td>'; var m = v.reduce(function (s, x) { return s + x.pnl; }, 0) / v.length; return '<td class="' + (m < 0 ? 'dn' : 'up') + '">' + money(m) + '</td>'; }).join('') + '</tr>';
+    }).join('');
+    $('st').textContent = rows.filter(function (r) { return r.done; }).length + ' batch day(s) closed since the reset. Updated ' + bkk(Date.now()) + ' Bangkok.';
+  }).catch(function (e) { $('st').textContent = 'Could not load: ' + e.message; });
+})();
+</script>
+</body>
+</html>

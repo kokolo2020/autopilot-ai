@@ -45,6 +45,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.38.3
+- New page: Market regimes (desk P&L per 8pm batch against the market move, with averages for down / flat / up days)
+
 ## v1.38.2
 - New extra desk: Reverse extremes (best and worst leg of the last Neutral Rev batch, side reversed)
 
