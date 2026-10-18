@@ -11,7 +11,7 @@ export const REV_UNI = new Set(TOP.slice(0, TOP_N));
 /* 18 Oct reset: only the Rev family runs, $1,000 per strategy. Each leg is $100 margin (RM), 5 weakest long + 5 strongest short = 10 legs. Coins must also have at least REV_MIN_VOL USD of 24h volume. */
 export const RM = 100, REV_MIN_VOL = 10e6;
 export const revOk = (r) => REV_UNI.has(r.coin) && (r.vol_usd == null || r.vol_usd >= REV_MIN_VOL);
-export const RETIRED = new Set(['ai', 'n', 's', 'u', 'm', 'g', 'algo', 'algo2', 'algo3', 'algoq', 'algow', 'algox', 'algot', 'algo3b', 'algo100', 'rev100', 'flip', 'revv', 'caprev', 'r3w', 'r3m', 'r3y', 'carry']);
+export const RETIRED = new Set(['ai', 'n', 's', 'u', 'm', 'g', 'algo', 'algo2', 'algo3', 'algoq', 'algow', 'algox', 'algot', 'algo3b', 'algo100', 'rev100', 'flip', 'revv', 'caprev', 'r3w', 'r3m', 'r3y']);
 export const MAX_SPREAD_BPS = 12;
 /* Four AI desks read the SAME Claude decision and differ only in how easily they act on it. Each has its own $250 per coin.
    Normal ':n', Aggressive '' (the original desk), Super ':s', Ultra ':u'. picks = how many of the biggest movers it may trade. */
@@ -630,14 +630,15 @@ async function revVariantTick(db, rows, openPos, ctl, desk) {
    every settlement (00:00, 08:00, 16:00 UTC; some coins settle every 4h) while the rate is positive. Slots are filled with the 20 coins that have the highest positive funding among the top-coin list
    (needs a live OKX perpetual and a spot market). A slot is closed after 3 settlements in a row with negative funding, then refilled with the best remaining coin.
    Costs: spot taker 0.10% + perp taker 0.055% on each leg and each of entry and exit, plus the bid/ask spread (spot bought at the ask and perp shorted at the bid; marks use the exit side). Spot is simulated from OKX spot prices, nothing is bought. Rows live in table ap_carry. Forward test. */
-export const CARRY = { slots: 20, leg: 250, spotFee: 0.001, perpFee: FEE, minRate: 0.00005, exitNegative: 3, scanEveryMin: 30 };
+/* v2 ($1,000 reset): 5 slots x ($100 spot + $100 short perp) = $1,000. Enter only when funding clears the round-trip cost (0.03% per settlement is about 3.4 days to break even); exit after 3 settlements in a row below exitBelow. */
+export const CARRY = { slots: 5, leg: 100, spotFee: 0.001, perpFee: FEE, minRate: 0.0003, exitBelow: 0.00005, exitNegative: 3, scanEveryMin: 30 };
 export const carryFees = () => CARRY.leg * (CARRY.spotFee + CARRY.perpFee);
 /* funding the short received for settlements newer than `sinceMs`; history = OKX rows { fundingRate, fundingTime } */
 export function carryFunding(history, sinceMs, notional) {
   const fresh = history.filter((h) => +h.fundingTime > sinceMs).sort((a, b) => +a.fundingTime - +b.fundingTime);
   return { earned: fresh.reduce((s, h) => s + notional * +h.fundingRate, 0), lastTs: fresh.length ? +fresh[fresh.length - 1].fundingTime : sinceMs, n: fresh.length };
 }
-export const carryShouldExit = (history) => { const h = history.slice().sort((a, b) => +b.fundingTime - +a.fundingTime).slice(0, CARRY.exitNegative); return h.length >= CARRY.exitNegative && h.every((x) => +x.fundingRate < 0); };
+export const carryShouldExit = (history) => { const h = history.slice().sort((a, b) => +b.fundingTime - +a.fundingTime).slice(0, CARRY.exitNegative); return h.length >= CARRY.exitNegative && h.every((x) => +x.fundingRate < CARRY.exitBelow); };
 export const carryPriceNet = (row, spot, perp) => (+row.spot_qty) * (spot - +row.spot_entry) + (+row.perp_qty) * (+row.perp_entry - perp);
 let carryScanAt = 0;
 export async function carryTick(db, ctl, now = Date.now()) {

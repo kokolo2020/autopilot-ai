@@ -18,3 +18,6 @@ Rules fixed in advance so we can't move the goalposts. The first test (old $250-
 
 ## Fail
 Anything else. Say so in the Day 30 post and name the rule that failed.
+
+## Extra (not part of pass/fail): Funding Carry v2, added 18 Oct 2026
+$1,000 bank: up to 5 coins, each $100 spot + $100 short perp (1x). Enters only when funding is at least 0.03% per settlement; exits after 3 settlements in a row below 0.005%. Judged on net P&L after fees and yearly pace on money in use. Idea from the perp/spot carry research (Sharpe about 1.8 for BTC at retail costs).

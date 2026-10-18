@@ -27,6 +27,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.32
+- Funding Carry v2: 5 coins, $100 per leg, enter only at 0.03%+ funding
+
 ## v1.31.1
 - Research page labels for the reset
 
