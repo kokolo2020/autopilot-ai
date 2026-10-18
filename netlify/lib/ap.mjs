@@ -365,7 +365,7 @@ async function limitTick(db, p, m) {
   for (const k of m.candles.filter((x) => x.t >= Math.floor(created / 60000) * 60000 + 60000)) {
     if (long ? k.l < lim * (1 - FILL_THROUGH) : k.h > lim * (1 + FILL_THROUGH)) {
       const hold = new Date(p.max_hold_until).getTime() - created, at = k.t + 60000;
-      await db.update('ap_positions', 'id=eq.' + p.id, { status: 'open', opened_at: new Date(at).toISOString(), max_hold_until: new Date(at + hold).toISOString() });
+      await db.update('ap_positions', 'id=eq.' + p.id, { status: 'open', opened_at: new Date(at).toISOString(), max_hold_until: /:revm$/.test(p.coin) ? p.max_hold_until : new Date(at + hold).toISOString() }); // Rev 2 limit keeps the 20:00 Bangkok close
       return 'filled';
     }
   }
@@ -433,6 +433,11 @@ export const ALGOT_COINS = ['AAVE', 'TIA', 'ICP', 'ZEC', 'ENA', 'APT', 'ARB', 'O
    Differences: leg 1 opens at 4x with a 10% stop (15% before v1.27). When the stop hits, the loss is booked and the SAME side reopens at the market price one leverage step higher (5x, 6x, 7x) with the same batch deadline.
    After the stop at 7x the leg is done (3 resets max). Every entry is a fresh $250 margin, so one leg can commit up to $1,000 margin and book up to roughly $825 of losses.
    The stop is kept just inside liquidation (1/lev minus 1%), so at 7x it would be 13.3%, which the 10% stop never reaches (a real 7x position is liquidated near 14.3%). :revm places leg 1 as a limit order 0.10% better, waits 10 minutes, pays maker fee on that entry; resets are market orders. Forward test. */
+/* All Rev-family batches close at 20:00 Bangkok (13:00 UTC) every day and the next batch opens right after. The first batch after a reset is shorter. */
+export const CLOSE_UTC_H = 13;
+export const boundaryAt = (now) => { const d = new Date(now); let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), CLOSE_UTC_H); if (t > now) t -= 86400000; return t; }; // latest 20:00 Bangkok at or before now
+export const nextClose = (now, days = 1) => boundaryAt(now) + days * 86400000;
+export const batchDue = (last, now, days = 1) => !last || new Date(last.opened_at).getTime() < boundaryAt(now) - (days - 1) * 86400000;
 export const REV2 = { K: 5, holdH: 24, lev0: 4, levMax: 7, stopPct: 0.10 }; // stop was 15% until v1.27; a back-test on 43 batches found 10% earned more with a smaller worst batch
 const rev2Lev = (p) => Math.round(+p.notional / RM), rev2Stop = (lev) => Math.min(REV2.stopPct, 1 / lev - 0.01);
 async function rev2Tick(db, rows, openPos, ctl, desk) {
@@ -451,13 +456,13 @@ async function rev2Tick(db, rows, openPos, ctl, desk) {
   if (openPos.length) return out;
   if (ctlBlocks(ctl, desk, '')) return out;
   const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&notional=eq.' + lev0N + '&order=opened_at.desc&limit=1').catch(() => []))[0];
-  if (last && Date.now() - new Date(last.opened_at).getTime() < REV2.holdH * 3600000) return out;
+  if (!batchDue(last, Date.now(), REV2.holdH / 24)) return out;
   const rk = rows.filter((r) => revOk(r) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
   if (rk.length < REV2.K * 2 + 4) return out;
   const legs = rk.slice(0, REV2.K).map((r) => [r, 1]).concat(rk.slice(-REV2.K).map((r) => [r, -1]));
   for (const [r, dir] of legs) {
     const m = r.m, d = decFor(m.price) + 2, px = limit ? m.price * (1 - dir * LIMIT_OFF / 100) : m.price, sp = rev2Stop(REV2.lev0);
-    await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', status: limit ? 'pending' : 'open', entry_price: px, size: lev0N / px, notional: lev0N, tp: +(px * (1 + dir * 0.5)).toFixed(d), sl: +(px * (1 - dir * sp)).toFixed(d), max_hold_until: new Date(Date.now() + REV2.holdH * 3600000).toISOString() });
+    await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', status: limit ? 'pending' : 'open', entry_price: px, size: lev0N / px, notional: lev0N, tp: +(px * (1 + dir * 0.5)).toFixed(d), sl: +(px * (1 - dir * sp)).toFixed(d), max_hold_until: new Date(nextClose(Date.now(), REV2.holdH / 24)).toISOString() });
     out.push(desk + (limit ? ' limit ' : ' opened ') + (dir > 0 ? 'LONG ' : 'SHORT ') + r.coin);
   }
   return out;
@@ -487,11 +492,11 @@ export async function rev3Tick(db, rows, openPos, ctl, desk) {
   if (openPos.length) return out;
   if (ctlBlocks(ctl, desk, '')) return out;
   const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&notional=eq.' + lev0N + '&order=opened_at.desc&limit=1').catch(() => []))[0];
-  if (last && Date.now() - new Date(last.opened_at).getTime() < holdH * 3600000) return out;
+  if (!batchDue(last, Date.now(), holdH / 24)) return out;
   const rk = rows.filter((r) => revOk(r) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
   if (rk.length < REV3.K * 2 + 4) return out;
   const legs = rk.slice(0, REV3.K).map((r) => [r, 1]).concat(rk.slice(-REV3.K).map((r) => [r, -1]));
-  const deadline = new Date(Date.now() + holdH * 3600000).toISOString(); // one deadline for the whole batch
+  const deadline = new Date(nextClose(Date.now(), holdH / 24)).toISOString(); // one deadline for the whole batch
   for (const [r, dir] of legs) {
     const m = r.m, d = decFor(m.price) + 2, px = m.price, sp = rev3Stop(P3.lev0);
     await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: px, size: lev0N / px, notional: lev0N, tp: +(px * (dir > 0 ? 100 : 0.01)).toFixed(d), sl: +(px * (1 - dir * sp)).toFixed(d), max_hold_until: deadline });
@@ -573,17 +578,18 @@ export const REV = { K: 5, holdH: 24 };
 async function revTick(db, rows, openRev, ctl) {
   const mine = Object.values(openRev);
   const out = [];
+  const holdH = REV.holdH;
   for (const p of mine) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' closed ' + x.pnl.toFixed(2)); } }
   if (mine.length) return out;
   if (ctlBlocks(ctl, 'rev', '')) return out;
   const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*:rev&order=opened_at.desc&limit=1').catch(() => []))[0];
-  if (last && Date.now() - new Date(last.opened_at).getTime() < holdH * 3600000) return out;
+  if (!batchDue(last, Date.now(), holdH / 24)) return out;
   const rk = rows.filter((r) => revOk(r) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
   if (rk.length < REV.K * 2 + 4) return out;
   const legs = rk.slice(0, REV.K).map((r) => [r, 1]).concat(rk.slice(-REV.K).map((r) => [r, -1]));
   /* One request inserts the whole batch, so two overlapping runs cannot interleave their legs. If two runs both opened a batch, the first one's 16 legs (lowest ids) stay and the rest are deleted. */
   const t0 = new Date(Date.now() - 120000).toISOString();
-  await db.insertMany('ap_positions', legs.map(([r, dir]) => { const m = r.m, notional = RM * LEV, d = decFor(m.price) + 2; return { coin: r.coin + ':rev', side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * 0.5)).toFixed(d), sl: +(m.price * (1 - dir * 0.5)).toFixed(d), max_hold_until: new Date(Date.now() + REV.holdH * 3600000).toISOString() }; }));
+  await db.insertMany('ap_positions', legs.map(([r, dir]) => { const m = r.m, notional = RM * LEV, d = decFor(m.price) + 2; return { coin: r.coin + ':rev', side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * 0.5)).toFixed(d), sl: +(m.price * (1 - dir * 0.5)).toFixed(d), max_hold_until: new Date(nextClose(Date.now(), REV.holdH / 24)).toISOString() }; }));
   for (const [r, dir] of legs) out.push('rev opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + r.coin);
   const fresh = await db.select('ap_positions', 'select=id&coin=like.*:rev&status=eq.open&opened_at=gte.' + encodeURIComponent(t0) + '&order=id.asc').catch(() => []);
   if (fresh.length > REV.K * 2) { await db.del('ap_positions', 'coin=like.*:rev&status=eq.open&id=gt.' + fresh[REV.K * 2 - 1].id).catch(() => null); out.push('rev duplicate batch removed (' + (fresh.length - REV.K * 2) + ' legs)'); }
@@ -614,13 +620,13 @@ export async function revVariantTick(db, rows, openPos, ctl, desk) {
   if (openPos.length) return out;
   if (ctlBlocks(ctl, desk, '')) return out;
   const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*' + sfx + '&order=opened_at.desc&limit=1').catch(() => []))[0];
-  if (last && Date.now() - new Date(last.opened_at).getTime() < REV.holdH * 3600000) return out;
+  if (!batchDue(last, Date.now(), holdH / 24)) return out;
   const rk = rows.filter((r) => revOk(r) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS)).sort((a, b) => a.m.change24h_pct - b.m.change24h_pct);
   if (rk.length < REV.K * 2 + 4) return out;
   if (desk === 'caprev' && mkt24(rk) > CAP_GATE) { out.push('caprev waiting: market 24h ' + mkt24(rk).toFixed(2) + '% > ' + CAP_GATE + '%'); return out; }
   for (const [r, dir, notional] of revVariantLegs(rk, desk)) {
     const m = r.m, d = decFor(m.price) + 2;
-    await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * 0.5)).toFixed(d), sl: +(m.price * (1 - dir * 0.5)).toFixed(d), max_hold_until: new Date(Date.now() + holdH * 3600000).toISOString() });
+    await db.insert('ap_positions', { coin: r.coin + sfx, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: m.price, size: notional / m.price, notional, tp: +(m.price * (1 + dir * 0.5)).toFixed(d), sl: +(m.price * (1 - dir * 0.5)).toFixed(d), max_hold_until: new Date(nextClose(Date.now(), holdH / 24)).toISOString() });
     out.push(desk + ' opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + r.coin + ' $' + Math.round(notional));
   }
   return out;

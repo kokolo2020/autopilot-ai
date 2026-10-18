@@ -6,7 +6,7 @@ Rules fixed in advance so we can't move the goalposts. The first test (old $250-
 - One batch per day: long the 5 weakest, short the 5 strongest coins (24h change) = 10 legs, $100 margin each.
 - Coins: top-50 list only, minimum $10M 24h volume.
 - Leverage: Neutral Rev 5x. Rev 2 / Rev 3 start 4x, 10% stop on margin, reopen at 5x / 6x / 7x.
-- Closed after 24h. No changes during the test. If we change anything, the 30 days restart.
+- Every batch closes at 20:00 Bangkok (13:00 UTC) daily and the next opens right after, so each full batch is 24h. The first batch after the reset is shorter. No changes during the test. If we change anything, the 30 days restart.
 - Batch 1 opens right after the reset; batch 30 closes about 30 days later.
 - All numbers net after fees, paper money.
 
@@ -27,3 +27,6 @@ Ideas for lower losses in a bear market, all paper, all judged on the same four 
 1. Capitulation Rev: Neutral Rev (5x, no stops) opens a batch only when the average 24h change of the coins is -1% or lower, otherwise it stays in cash.
 2. Rev 3 low-leverage: Rev 3 rules but 2x then 3x instead of 4x to 7x. Worst case per leg is about $20 instead of $40.
 3. Neutral Rev weekly: one batch per 7 days (5x, no stops) to cut fees.
+
+## Closing time (18 Oct 2026)
+All batches close at 20:00 Bangkok every day. Neutral Rev weekly closes at 20:00 on day 7. Batch 1 of the reset (opened 18 Oct 12:05) closes at 20:00 the same day and counts as a partial day.

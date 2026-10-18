@@ -29,6 +29,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.34
+- All batches close at 20:00 Bangkok daily (weekly desk day 7)
+
 ## v1.33
 - Three extra test desks: Capitulation Rev, Rev 3 low-leverage, Neutral Rev weekly
 
