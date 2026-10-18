@@ -790,7 +790,7 @@ export async function revxTick(db, rows, openPos, ctl) {
 
 /* :pick My picks (paper, Koko's own 20 coins). $250 margin each at 3x on OKX perpetuals ($750 notional, $5,000 in total), all LONG, opened once at the first tick and then held (no daily close, no take profit).
    A long at 3x is liquidated near -33%, so a leg is closed at -32% as "liquidated". Funding is booked into pnl when a leg closes. Coins with no OKX USDT perpetual are skipped and listed on picks.html. */
-export const MYPICKS = { coins: ['ZEN', 'NEAR', 'OP', 'ARB', 'RUNE', 'JTO', 'MON', 'EGLD', 'HYPE', 'SOL', 'SUI', 'GRAM', 'WLD', 'VVV', 'JUP', 'RAY', 'AERO', 'XRP', 'AVAX', 'CARDS'], margin: 250, lev: 3, liqAt: -0.32, addAt: -0.18, addMargin: 100 };
+export const MYPICKS = { coins: ['ZEN', 'NEAR', 'OP', 'ARB', 'RUNE', 'JTO', 'MON', 'EGLD', 'HYPE', 'SOL', 'SUI', 'GRAM', 'WLD', 'VVV', 'JUP', 'RAY', 'AERO', 'XRP', 'AVAX', 'CARDS'], margin: 250, lev: 3, liqAt: -0.32, addAt: -0.18, addMargin: 100, maxAdds: 4 };
 export async function picksTick(db, ctl) {
   const out = [];
   if (ctlBlocks(ctl, 'pick', '')) return out;
@@ -798,11 +798,13 @@ export async function picksTick(db, ctl) {
   const tk = {}; for (const t of await okx('/api/v5/market/tickers?instType=SWAP')) tk[t.instId] = { last: +t.last, ask: +t.askPx > 0 ? +t.askPx : +t.last };
   for (const p of all.filter((x) => x.status === 'open')) { const t = tk[p.coin.split(':')[0] + '-USDT-SWAP']; if (t && t.last <= +p.entry_price * (1 + MYPICKS.liqAt)) { const x = await closePos(db, p, +p.entry_price * (1 + MYPICKS.liqAt), 'liquidated'); out.push(p.coin + ' liquidated ' + x.toFixed(2)); } }
   const had = new Set(all.map((x) => x.coin.split(':')[0]));
-  for (const p of all.filter((x) => x.status === 'open' && x.close_reason !== 'pick-add')) { // one add-on per coin: +$100 margin at 3x once the price is 18% below the first entry
-    const c = p.coin.split(':')[0], t = tk[c + '-USDT-SWAP']; if (!t || all.filter((x) => x.coin === p.coin).length > 1 || !(t.last <= +p.entry_price * (1 + MYPICKS.addAt))) continue;
+  const byCoin = {}; for (const x of all) (byCoin[x.coin] = byCoin[x.coin] || []).push(x);
+  for (const g of Object.values(byCoin)) { // ladder: +$100 margin at 3x each time the price is another 18% below the latest entry of that coin, at most MYPICKS.maxAdds add-ons
+    g.sort((x, y) => x.id - y.id); const c = g[0].coin.split(':')[0], t = tk[c + '-USDT-SWAP'], last = g[g.length - 1];
+    if (!t || !g.some((x) => x.status === 'open') || g.length - 1 >= MYPICKS.maxAdds || !(t.last <= +last.entry_price * (1 + MYPICKS.addAt))) continue;
     const notional = MYPICKS.addMargin * MYPICKS.lev, d = decFor(t.ask);
-    await db.insert('ap_positions', { coin: p.coin, side: 'LONG', entry_price: t.ask, size: notional / t.ask, notional, tp: +(t.ask * 100).toFixed(d), sl: +(t.ask * (1 + MYPICKS.liqAt)).toFixed(d), max_hold_until: '2099-12-31T00:00:00Z', close_reason: 'pick-add' });
-    out.push('pick add-on LONG ' + c + ' $' + notional + ' at ' + t.ask);
+    await db.insert('ap_positions', { coin: g[0].coin, side: 'LONG', entry_price: t.ask, size: notional / t.ask, notional, tp: +(t.ask * 100).toFixed(d), sl: +(t.ask * (1 + MYPICKS.liqAt)).toFixed(d), max_hold_until: '2099-12-31T00:00:00Z', close_reason: 'pick-add' });
+    out.push('pick add-on #' + g.length + ' LONG ' + c + ' $' + notional + ' at ' + t.ask);
   }
   for (const c of MYPICKS.coins) {
     if (had.has(c)) continue;

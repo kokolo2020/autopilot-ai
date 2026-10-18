@@ -48,6 +48,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.39.2
+- My picks: add-on ladder (+$100 at 3x every further 18% down, max 4 per coin)
+
 ## v1.39.1
 - My picks: add $100 margin at 3x when a coin falls 18% below entry (once per coin)
 
