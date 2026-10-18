@@ -21,10 +21,10 @@
 <div class="wrap">
   <h1>History study: bears, bulls and mean reversion</h1>
   <div class="sub">Does "buy yesterday's weakest, short yesterday's strongest" hold up, and does the best long/short split change with the market phase? Daily OKX history for the major coins. Nothing here trades.</div>
-  <div style="margin:12px 0"><button id="go" type="button">Run the study</button><button id="cp" type="button" style="display:none">Copy results</button></div>
+  <div style="margin:12px 0"><button id="go" type="button">Run the study</button><button id="cp" type="button" style="display:none">Copy results</button> <label class="mut">Hold for (tables C and D): <select id="hs"><option value="1">1 day</option><option value="3" selected>3 days</option><option value="7">7 days</option></select></label></div>
   <div class="bar"><i id="pb"></i></div><div class="sub" id="st">Press the button. It downloads about 5 years of daily candles for about 40 coins (1 to 2 minutes), then everything is calculated in your browser.</div>
   <div id="out"></div>
-  <p class="mut">Caveats, so we do not over-trust it: (1) the coin list is today's survivors, which flatters "buy the loser" because coins that died are missing; (2) daily candles close at 00:00 UTC (07:00 Bangkok), not 20:00; (3) these are spot prices, so no funding or perpetual quirks; (4) costs assumed 0.11% per leg (round trip at 0.055% per side); (5) one cycle is a handful of independent episodes, not thousands. <a href="/research">Back to research</a></p>
+  <p class="mut">Caveats, so we do not over-trust it: (1) the coin list is today's survivors, which flatters "buy the loser" because coins that died are missing; (2) daily candles close at 00:00 UTC (07:00 Bangkok), not 20:00; (3) these are spot prices, so no funding or perpetual quirks; (4) costs are shown at 0.11% (taker both ways), 0.075% and 0.04% per leg round trip; (5) one cycle is a handful of independent episodes, not thousands. <a href="/research">Back to research</a></p>
 </div>
 <script>
 (function () {
@@ -43,62 +43,72 @@
     return page();
   }
   function sma(arr, i, n) { if (i < n - 1) return null; var s = 0; for (var k = i - n + 1; k <= i; k++) { if (arr[k] == null) return null; s += arr[k]; } return s / n; }
+  var HS = [1, 3, 7];
   function analyse(data) {
     var btc = data.BTC; if (!btc) throw new Error('No BTC history');
-    var ds = Object.keys(btc).map(Number).sort(function (a, b) { return a - b; }), d0 = ds[0], d1 = ds[ds.length - 1], bs = [];
+    var ds = Object.keys(btc).map(Number).sort(function (a, b) { return a - b; }), d0 = ds[0], d1 = ds[ds.length - 1], bs = [], names = Object.keys(data), rec = [];
     for (var d = d0; d <= d1; d++) bs.push(btc[d] == null ? null : btc[d]);
-    var rec = [], names = Object.keys(data);
+    var mean = function (a) { return a.length ? a.reduce(function (s, x) { return s + x; }, 0) / a.length : 0; };
     for (var i = 200; i < bs.length - 1; i++) {
       var day = d0 + i, s200 = sma(bs, i, 200), s50 = sma(bs, i, 50); if (s200 == null || s50 == null || bs[i] == null) continue;
       var reg = bs[i] < s200 && s50 < s200 ? 'bear' : bs[i] > s200 && s50 > s200 ? 'bull' : 'transition', el = [];
-      names.forEach(function (c) { var a = data[c][day - 1], b = data[c][day], z = data[c][day + 1]; if (a && b && z) el.push({ c: c, r: b / a - 1, f: (z / b - 1) * 100 }); });
+      names.forEach(function (c) { var a = data[c][day - 1], b = data[c][day]; if (a && b) el.push({ c: c, r: b / a - 1 }); });
       if (el.length < 14) continue;
       el.sort(function (x, y) { return x.r - y.r; });
-      var fs = el.map(function (x) { return x.f; }).slice().sort(function (x, y) { return x - y; }), mkt = fs[Math.floor(fs.length / 2)], mean = function (a) { return a.reduce(function (s, x) { return s + x; }, 0) / a.length; };
-      var weak = el.slice(0, 5).map(function (x) { return x.f; }), strong = el.slice(-5).map(function (x) { return x.f; }).reverse(), k = [];
-      for (var L = 0; L <= 10; L++) { var lg = el.slice(0, Math.min(L, 5)).map(function (x) { return x.f; }), longs = el.slice(0, L).map(function (x) { return x.f; }), sh = el.slice(-(10 - L)).map(function (x) { return x.f; }); if (L === 0) longs = []; if (L === 10) sh = []; var p = (longs.reduce(function (s, x) { return s + x; }, 0) - sh.reduce(function (s, x) { return s + x; }, 0)) / 10 - COST; k.push(p); }
-      var mktRet = (bs[i] / bs[i - 1] - 1) * 100;
-      rec.push({ day: day, yr: new Date(day * DAY).getUTCFullYear(), reg: reg, weak: mean(weak), strong: mean(strong), mkt: mkt, k: k, mktDown: mean(el.map(function (x) { return x.r; })) < -0.01, btc1: mktRet });
+      var o = { day: day, yr: new Date(day * DAY).getUTCFullYear(), reg: reg, m1: mean(el.map(function (x) { return x.r; })) * 100, h: {} };
+      HS.forEach(function (H) {
+        var e2 = el.map(function (x) { var z = data[x.c][day + H], b = data[x.c][day]; return z && b ? { r: x.r, f: (z / b - 1) * 100 } : null; }).filter(Boolean); if (e2.length < 14) return;
+        var f = e2.map(function (x) { return x.f; }), k = [];
+        for (var L = 0; L <= 10; L++) { var lg = f.slice(0, L), sh = L === 10 ? [] : f.slice(-(10 - L)); k.push((lg.reduce(function (s, x) { return s + x; }, 0) - sh.reduce(function (s, x) { return s + x; }, 0)) / 10); }
+        o.h[H] = { weak: mean(f.slice(0, 5)), strong: mean(f.slice(-5)), mk: mean(f), k: k };
+      });
+      if (o.h[1]) rec.push(o);
     }
     return { rec: rec, names: names, d0: d0, d1: d1 };
   }
-  function summarise(an) {
-    var h = '', t = '', mean = function (a) { return a.length ? a.reduce(function (s, x) { return s + x; }, 0) / a.length : 0; }, groups = [['bear', 'Bear (BTC under its 200-day, trend down)'], ['transition', 'Transition (recovery or topping)'], ['bull', 'Bull (BTC over its 200-day, trend up)'], ['all', 'All days']];
-    h += '<h2>1. Does yesterday\'s loser bounce and yesterday\'s winner fade? (next-day move, in %)</h2><div class="scroll"><table><tr><th>Phase</th><th>Days</th><th>Weakest 5</th><th>Strongest 5</th><th>Market median</th><th>Weakest vs market</th><th>Strongest vs market</th><th>Weakest beat market</th></tr>';
-    t += 'HISTORY STUDY ' + new Date(an.d0 * DAY).toISOString().slice(0, 10) + ' to ' + new Date(an.d1 * DAY).toISOString().slice(0, 10) + ', ' + an.names.length + ' coins\n1) next-day % : phase days weak5 strong5 market weakVsMkt strongVsMkt weakBeatMkt\n';
-    groups.forEach(function (g) {
-      var r = an.rec.filter(function (x) { return g[0] === 'all' || x.reg === g[0]; }); if (!r.length) return;
-      var w = mean(r.map(function (x) { return x.weak; })), s = mean(r.map(function (x) { return x.strong; })), m = mean(r.map(function (x) { return x.mkt; })), beat = r.filter(function (x) { return x.weak > x.mkt; }).length / r.length * 100;
-      h += '<tr><td>' + g[1] + '</td><td>' + r.length + '</td><td class="' + cls(w) + '">' + f2(w) + '</td><td class="' + cls(s) + '">' + f2(s) + '</td><td class="' + cls(m) + '">' + f2(m) + '</td><td class="' + cls(w - m) + '">' + f2(w - m) + '</td><td class="' + cls(-(s - m)) + '">' + f2(s - m) + '</td><td>' + beat.toFixed(0) + '%</td></tr>';
-      t += g[0] + ' ' + r.length + ' ' + f2(w) + ' ' + f2(s) + ' ' + f2(m) + ' ' + f2(w - m) + ' ' + f2(s - m) + ' ' + beat.toFixed(0) + '%\n';
-    });
-    h += '</table></div><div class="sub">Mean reversion needs "Weakest vs market" above 0 and "Strongest vs market" below 0.</div>';
-    h += '<h2>2. Best long/short split per phase (average % per leg per day after 0.11% costs; 10 legs)</h2><div class="scroll"><table><tr><th>Phase</th><th>Days</th>';
-    for (var L = 0; L <= 10; L++) h += '<th>' + L + 'L / ' + (10 - L) + 'S</th>'; h += '</tr>'; t += '2) avg % per leg per day after costs, columns = longs 0..10\n';
-    groups.forEach(function (g) {
-      var r = an.rec.filter(function (x) { return g[0] === 'all' || x.reg === g[0]; }); if (!r.length) return;
-      var avg = []; for (var L = 0; L <= 10; L++) avg.push(mean(r.map(function (x) { return x.k[L]; }))); var best = avg.indexOf(Math.max.apply(null, avg));
-      h += '<tr><td>' + g[0] + '</td><td>' + r.length + '</td>' + avg.map(function (v, i) { return '<td class="' + (i === best ? 'best ' : '') + cls(v) + '">' + f2(v) + '</td>'; }).join('') + '</tr>'; t += g[0] + ' ' + avg.map(f2).join(' ') + ' | best ' + best + 'L/' + (10 - best) + 'S\n';
-    });
-    h += '</table></div><div class="sub">5L / 5S is the current design. The highlighted cell is the best split in that phase.</div>';
-    var yrs = {}; an.rec.forEach(function (x) { (yrs[x.yr] = yrs[x.yr] || []).push(x); });
-    h += '<h2>3. By year: current 5L / 5S and the market phase mix</h2><div class="scroll"><table><tr><th>Year</th><th>Days</th><th>5L / 5S avg % per leg per day</th><th>Weakest vs market</th><th>Bear</th><th>Transition</th><th>Bull</th></tr>'; t += '3) by year: days 5L5S weakVsMkt bear/trans/bull days\n';
-    Object.keys(yrs).sort().forEach(function (y) {
-      var r = yrs[y], a = mean(r.map(function (x) { return x.k[5]; })), w = mean(r.map(function (x) { return x.weak - x.mkt; })), c = function (g) { return r.filter(function (x) { return x.reg === g; }).length; };
-      h += '<tr><td>' + y + '</td><td>' + r.length + '</td><td class="' + cls(a) + '">' + f2(a) + '</td><td class="' + cls(w) + '">' + f2(w) + '</td><td>' + c('bear') + '</td><td>' + c('transition') + '</td><td>' + c('bull') + '</td></tr>'; t += y + ' ' + r.length + ' ' + f2(a) + ' ' + f2(w) + ' ' + c('bear') + '/' + c('transition') + '/' + c('bull') + '\n';
+  var COSTS = [0.11, 0.075, 0.04];
+  function summarise(an, Hsel) {
+    var mean = function (a) { return a.length ? a.reduce(function (s, x) { return s + x; }, 0) / a.length : 0; }, h = '', t = '', phases = [['bear', 'Bear'], ['transition', 'Transition'], ['bull', 'Bull'], ['all', 'All days']];
+    var sel = function (f, H) { return an.rec.filter(function (x) { return x.h[H] && f(x); }); };
+    t += 'HISTORY STUDY v2 ' + new Date(an.d0 * DAY).toISOString().slice(0, 10) + ' to ' + new Date(an.d1 * DAY).toISOString().slice(0, 10) + ', ' + an.names.length + ' coins. All numbers are % per leg. Net = gross minus round-trip cost.\n';
+    h += '<h2>A. Phase and holding period: is there an edge, and what do costs do to it?</h2><div class="scroll"><table><tr><th>Phase</th><th>Hold</th><th>Days</th><th>Weakest 5 vs market</th><th>Strongest 5 vs market</th><th>5L/5S gross per leg</th>' + COSTS.map(function (c) { return '<th>Net @ ' + c + '%</th>'; }).join('') + '<th>Net @ 0.11% per day</th></tr>'; t += 'A) phase hold days weak-mkt strong-mkt gross5L5S net0.11 net0.075 net0.04 net0.11/day\n';
+    phases.forEach(function (p) { HS.forEach(function (H) {
+      var r = sel(function (x) { return p[0] === 'all' || x.reg === p[0]; }, H); if (!r.length) return;
+      var w = mean(r.map(function (x) { return x.h[H].weak - x.h[H].mk; })), st = mean(r.map(function (x) { return x.h[H].strong - x.h[H].mk; })), g = mean(r.map(function (x) { return (x.h[H].weak - x.h[H].strong) / 2; })), nets = COSTS.map(function (c) { return g - c; });
+      h += '<tr><td>' + p[1] + '</td><td>' + H + 'd</td><td>' + r.length + '</td><td class="' + cls(w) + '">' + f2(w) + '</td><td class="' + cls(-st) + '">' + f2(st) + '</td><td class="' + cls(g) + '">' + f2(g) + '</td>' + nets.map(function (n) { return '<td class="' + cls(n) + '">' + f2(n) + '</td>'; }).join('') + '<td class="' + cls(nets[0] / H) + '">' + f2(nets[0] / H) + '</td></tr>';
+      t += p[0] + ' ' + H + 'd ' + r.length + ' ' + f2(w) + ' ' + f2(st) + ' ' + f2(g) + ' ' + nets.map(f2).join(' ') + ' ' + f2(nets[0] / H) + '\n';
+    }); });
+    h += '</table></div><div class="sub">Compared with the market AVERAGE of all coins (the fix). Reversion needs "weakest vs market" above 0 and "strongest vs market" below 0. Cost is paid once per hold, so longer holds pay it less often.</div>';
+    var ths = [['market average 1-day move of -1% or worse', -1], ['-2% or worse', -2], ['-3% or worse', -3]];
+    h += '<h2>B. After a falling market (market = average 1-day move of all coins)</h2><div class="scroll"><table><tr><th>Condition</th><th>Hold</th><th>Days</th><th>Weakest 5 vs market</th><th>Strongest 5 vs market</th><th>5L/5S gross per leg</th><th>Net @ 0.11%</th><th>Net @ 0.04%</th><th>10L/0S gross</th></tr>'; t += 'B) after-down-day: cond hold days weak-mkt strong-mkt gross net0.11 net0.04 10L0S\n';
+    ths.concat([['all other days', null]]).forEach(function (th) { HS.forEach(function (H) {
+      var r = sel(function (x) { return th[1] == null ? x.m1 > -1 : x.m1 <= th[1]; }, H); if (r.length < 5) return;
+      var w = mean(r.map(function (x) { return x.h[H].weak - x.h[H].mk; })), st = mean(r.map(function (x) { return x.h[H].strong - x.h[H].mk; })), g = mean(r.map(function (x) { return (x.h[H].weak - x.h[H].strong) / 2; })), lo = mean(r.map(function (x) { return x.h[H].k[10] / 1; }));
+      h += '<tr><td>' + th[0] + '</td><td>' + H + 'd</td><td>' + r.length + '</td><td class="' + cls(w) + '">' + f2(w) + '</td><td class="' + cls(-st) + '">' + f2(st) + '</td><td class="' + cls(g) + '">' + f2(g) + '</td><td class="' + cls(g - 0.11) + '">' + f2(g - 0.11) + '</td><td class="' + cls(g - 0.04) + '">' + f2(g - 0.04) + '</td><td class="' + cls(lo) + '">' + f2(lo) + '</td></tr>';
+      t += th[0] + ' ' + H + 'd ' + r.length + ' ' + f2(w) + ' ' + f2(st) + ' ' + f2(g) + ' ' + f2(g - 0.11) + ' ' + f2(g - 0.04) + ' ' + f2(lo) + '\n';
+    }); });
+    h += '</table></div><div class="sub">10L/0S = long the 10 weakest only: a bet on the whole market bouncing, so it is not market-neutral.</div>';
+    h += '<h2>C. Best long/short split per phase (net per leg per trade at 0.075% cost, hold ' + Hsel + ' day' + (Hsel > 1 ? 's' : '') + ')</h2><div class="scroll"><table><tr><th>Phase</th><th>Days</th>'; for (var L = 0; L <= 10; L++) h += '<th>' + L + 'L/' + (10 - L) + 'S</th>'; h += '</tr>'; t += 'C) split net@0.075 hold ' + Hsel + 'd, columns longs 0..10\n';
+    phases.forEach(function (p) {
+      var r = sel(function (x) { return p[0] === 'all' || x.reg === p[0]; }, Hsel); if (!r.length) return; var avg = []; for (var L = 0; L <= 10; L++) avg.push(mean(r.map(function (x) { return x.h[Hsel].k[L]; })) - 0.075); var best = avg.indexOf(Math.max.apply(null, avg));
+      h += '<tr><td>' + p[1] + '</td><td>' + r.length + '</td>' + avg.map(function (v, i) { return '<td class="' + (i === best ? 'best ' : '') + cls(v) + '">' + f2(v) + '</td>'; }).join('') + '</tr>'; t += p[0] + ' ' + avg.map(f2).join(' ') + ' | best ' + best + 'L/' + (10 - best) + 'S\n';
     });
     h += '</table></div>';
-    var dn = an.rec.filter(function (x) { return x.mktDown; }), up = an.rec.filter(function (x) { return !x.mktDown; });
-    h += '<h2>4. After a day when the whole market fell more than 1% (average of coins)</h2><div class="scroll"><table><tr><th>Condition</th><th>Days</th><th>Weakest vs market</th><th>5L / 5S</th><th>10L / 0S</th><th>0L / 10S</th></tr>';
-    t += '4) market down >1% day vs other: days weakVsMkt 5L5S 10L 0L\n';
-    [['Market down more than 1%', dn], ['Other days', up]].forEach(function (g) { var r = g[1]; if (!r.length) return; var w = mean(r.map(function (x) { return x.weak - x.mkt; })), a = mean(r.map(function (x) { return x.k[5]; })), b = mean(r.map(function (x) { return x.k[10]; })), c = mean(r.map(function (x) { return x.k[0]; })); h += '<tr><td>' + g[0] + '</td><td>' + r.length + '</td><td class="' + cls(w) + '">' + f2(w) + '</td><td class="' + cls(a) + '">' + f2(a) + '</td><td class="' + cls(b) + '">' + f2(b) + '</td><td class="' + cls(c) + '">' + f2(c) + '</td></tr>'; t += g[0] + ' ' + r.length + ' ' + f2(w) + ' ' + f2(a) + ' ' + f2(b) + ' ' + f2(c) + '\n'; });
+    var yrs = {}; an.rec.forEach(function (x) { if (x.h[Hsel]) (yrs[x.yr] = yrs[x.yr] || []).push(x); });
+    h += '<h2>D. By year (5L/5S, hold ' + Hsel + 'd, net @ 0.075%)</h2><div class="scroll"><table><tr><th>Year</th><th>Days</th><th>5L/5S net per leg</th><th>Weakest vs market</th><th>Bear days</th><th>Transition</th><th>Bull</th></tr>'; t += 'D) by year hold ' + Hsel + 'd: days net5L5S weak-mkt bear/trans/bull\n';
+    Object.keys(yrs).sort().forEach(function (y) { var r = yrs[y], g = mean(r.map(function (x) { return (x.h[Hsel].weak - x.h[Hsel].strong) / 2; })) - 0.075, w = mean(r.map(function (x) { return x.h[Hsel].weak - x.h[Hsel].mk; })), c = function (q) { return r.filter(function (x) { return x.reg === q; }).length; };
+      h += '<tr><td>' + y + '</td><td>' + r.length + '</td><td class="' + cls(g) + '">' + f2(g) + '</td><td class="' + cls(w) + '">' + f2(w) + '</td><td>' + c('bear') + '</td><td>' + c('transition') + '</td><td>' + c('bull') + '</td></tr>'; t += y + ' ' + r.length + ' ' + f2(g) + ' ' + f2(w) + ' ' + c('bear') + '/' + c('transition') + '/' + c('bull') + '\n'; });
     h += '</table></div>';
     $('out').innerHTML = h; text = t; $('cp').style.display = '';
   }
+  var AN = null;
+  function done(data) { $('st').textContent = 'Calculating...'; try { AN = analyse(data); summarise(AN, +$('hs').value); $('st').textContent = 'Done. ' + Object.keys(data).length + ' coins, ' + AN.rec.length + ' days analysed (' + new Date(AN.d0 * DAY).toISOString().slice(0, 10) + ' to ' + new Date(AN.d1 * DAY).toISOString().slice(0, 10) + ').'; } catch (e) { $('st').textContent = 'Could not analyse: ' + e.message; } $('go').disabled = false; }
+  $('hs').onchange = function () { if (AN) summarise(AN, +$('hs').value); };
   $('go').onclick = function () {
     $('go').disabled = true; var data = {}, i = 0;
+    try { var c = JSON.parse(localStorage.getItem('ap-study-v2') || 'null'); if (c && Date.now() - c.t < 12 * 3600000) { done(c.d); return; } } catch (e) {}
     function next() {
-      if (i >= COINS.length) { $('st').textContent = 'Calculating...'; try { var an = analyse(data); summarise(an); $('st').textContent = 'Done. ' + Object.keys(data).length + ' coins, ' + an.rec.length + ' days analysed (' + new Date(an.d0 * DAY).toISOString().slice(0, 10) + ' to ' + new Date(an.d1 * DAY).toISOString().slice(0, 10) + ').'; } catch (e) { $('st').textContent = 'Could not analyse: ' + e.message; } $('go').disabled = false; return; }
+      if (i >= COINS.length) { try { localStorage.setItem('ap-study-v2', JSON.stringify({ t: Date.now(), d: data })); } catch (e) {} done(data); return; }
       var c = COINS[i]; $('st').textContent = 'Downloading ' + c + ' (' + (i + 1) + ' of ' + COINS.length + ')...'; $('pb').style.width = (i / COINS.length * 100) + '%';
       fetchCoin(c).then(function (d) { if (Object.keys(d).length > 250) data[c] = d; i++; next(); });
     }

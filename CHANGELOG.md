@@ -50,6 +50,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.41
+- Study v2: compares against the market average (fixes the median error), holds of 1, 3 and 7 days, fee scenarios (0.11%, 0.075%, 0.04%), and down-day thresholds of -1%, -2%, -3%
+
 ## v1.40
 - New: History study page (years of daily OKX data: does buying the weakest and shorting the strongest work in bear, transition and bull phases, and what long/short split is best)
 
