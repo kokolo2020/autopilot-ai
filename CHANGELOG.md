@@ -56,6 +56,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.45
+- New: Daily report page (report.html). Every 7am close: totals, market move, highlights, desks ranked, 30-day leaderboard, My picks at the close, every leg; pick any past close; Download PDF
+
 ## v1.44.1
 - Pages now show the 7am Bangkok close (arena countdown, batch tracker, saga, research labels); 30-day test note
 

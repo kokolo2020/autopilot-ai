@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot Daily Report</title>
+<style>
+  :root { --bg:#0b0f14; --card:#121922; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --acc:#6aa9ff; --up:#3ddc97; --dn:#ff6b6b; --gold:#f5c451; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f4f6f9; --card:#fff; --line:#dde3ea; --text:#17202b; --mut:#5b6b7d; --acc:#2c6fd6; --up:#1a8f5f; --dn:#c0392b; --gold:#b7861a; } }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:16px; } h1 { font-size:22px; margin:0; } h2 { font-size:15px; margin:24px 0 8px; } h3 { font-size:13px; margin:16px 0 6px; }
+  .sub, .mut { color:var(--mut); font-size:12px; } a { color:var(--acc); }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0; } select, button { font:inherit; padding:7px 12px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--text); } button { cursor:pointer; font-weight:600; } button.pri { background:var(--acc); color:#fff; border-color:var(--acc); }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:12px; } .kpi { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; } .kpi .l { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.05em; } .kpi .v { font-size:20px; font-weight:700; margin-top:2px; font-variant-numeric:tabular-nums; } .kpi .s { color:var(--mut); font-size:12px; }
+  .scroll { overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--card); } table { border-collapse:collapse; width:100%; font-size:13px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  th, td { padding:7px 10px; text-align:right; border-bottom:1px solid var(--line); } th:first-child, td:first-child { text-align:left; } th { color:var(--mut); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; } tr:last-child td { border-bottom:0; } table.rk th:nth-child(2), table.rk td:nth-child(2) { text-align:left; }
+  .up { color:var(--up); } .dn { color:var(--dn); } .gold { color:var(--gold); } .tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:700; } .tag.down { background:rgba(255,107,107,.15); color:var(--dn); } .tag.up { background:rgba(61,220,151,.15); color:var(--up); } .tag.flat { background:rgba(139,152,168,.18); color:var(--mut); }
+  ul.hl { margin:0; padding-left:20px; } ul.hl li { margin:4px 0; } .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .desk { break-inside:avoid; page-break-inside:avoid; }
+  @media print {
+    @page { size:A4 landscape; margin:10mm; }
+    :root, :root:not([data-theme="dark"]) { --bg:#fff; --card:#fff; --line:#ccd3db; --text:#111; --mut:#555; --acc:#1d4ed8; --up:#11804f; --dn:#b42318; --gold:#8a6400; }
+    body { font-size:11px; } .wrap { max-width:none; padding:0; } .noprint { display:none !important; } .scroll { overflow:visible; border-radius:0; } table { font-size:10px; } th, td { padding:3px 6px; } h2 { margin:14px 0 6px; page-break-after:avoid; } .kpi .v { font-size:15px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="ttl">Daily report</h1>
+  <div class="sub" id="st">Loading...</div>
+  <div class="bar noprint">
+    <label class="mut">Close: <select id="pick"></select></label>
+    <button class="pri" id="pdf" type="button">Download PDF</button>
+    <a class="mut" href="/research">Back to research</a>
+  </div>
+  <div id="out"></div>
+  <p class="mut">Paper money. Net P&amp;L is after fees (and funding for Rev 3 and My picks). Fees column is an estimate from the fee rules: taker 0.055% per side, Rev 2 limit maker 0.02% on limit entries and 7am exits, spot 0.10% per side. Market move = median change of the tracked top-50 coins from the batch open to its close. The 30-day test restarted with the batch that opened 19 Oct 07:00 Bangkok (day 1 closes 20 Oct 07:00).</p>
+</div>
+<script>
+(function () {
+  var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
+  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
+  var NAMES = { rev: 'Neutral Rev', rev2: 'Rev 2', revm: 'Rev 2 limit', rev2s: 'Rev 2 + winner exit', revs: 'Neutral Rev scale-out', revx: 'Reverse extremes', caprev: 'Capitulation Rev', r3d: 'Rev 3 daily', r3l: 'Rev 3 low-leverage', flip: 'Trend Flip', revv: 'Risk-balanced Rev', spl: 'Spot long-only', spm: 'Spot margin Rev' };
+  var ORDER = Object.keys(NAMES), TEST0 = Date.parse('2026-10-19T00:00:00Z'), BANK = 1000;
+  var $ = function (i) { return document.getElementById(i); };
+  var money = function (n) { return (n < 0 ? '-' : '+') + '$' + Math.abs(n).toFixed(2); }, pct = function (n) { return (n < 0 ? '' : '+') + n.toFixed(2) + '%'; }, cls = function (n) { return n < 0 ? 'dn' : n > 0 ? 'up' : 'mut'; };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  function get(t, q) { return fetch(URL_ + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
+  var bkk = function (ms, withDay) { return new Date(ms).toLocaleString('en-GB', Object.assign({ timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit' }, withDay === false ? {} : { weekday: 'short', day: '2-digit', month: 'short' })); };
+  var ymd = function (ms) { return new Date(ms + 7 * 3600000).toISOString().slice(0, 10); };
+  var med = function (a) { a = a.filter(function (x) { return isFinite(x); }).sort(function (x, y) { return x - y; }); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
+  function snap(ms) { return get('ap_samples', 'select=coin,price,ts&ts=gte.' + new Date(ms - 8 * 60000).toISOString() + '&ts=lte.' + new Date(ms + 8 * 60000).toISOString() + '&order=ts.desc&limit=600').then(function (r) { var o = {}; r.forEach(function (x) { if (!o[x.coin]) o[x.coin] = +x.price; }); return o; }).catch(function () { return {}; }); }
+  function feeEst(p) {
+    var s = p.coin.split(':')[1], n = +p.notional;
+    if (s === 'spl' || s === 'spm') return n * 0.002;
+    if (s === 'revm') return n * ((Math.abs(n - 400) < 1e-6 ? 0.0002 : 0.00055) + (p.close_reason === 'time exit' ? 0.0002 : 0.00055));
+    return n * 0.0011;
+  }
+  var ALL = [], PICKS = [], CLOSES = [];
+  function deadline(p) { return Math.round(new Date(p.max_hold_until).getTime() / 3600000) * 3600000; }
+  function load() {
+    return Promise.all([
+      get('ap_positions', 'select=id,coin,side,entry_price,exit_price,notional,pnl,status,close_reason,opened_at,closed_at,max_hold_until&opened_at=gte.2026-10-18T00:00:00Z&status=in.(open,closed)&coin=like.*:*&order=id.asc&limit=6000'),
+      get('ap_positions', 'select=coin,status,entry_price,exit_price,notional,pnl,opened_at,closed_at,close_reason&coin=like.*:pick&order=id.asc&limit=300').catch(function () { return []; })
+    ]).then(function (r) {
+      ALL = r[0].filter(function (p) { return NAMES[p.coin.split(':')[1]]; }); PICKS = r[1];
+      var seen = {}; ALL.forEach(function (p) { var b = deadline(p); if (b <= Date.now() + 60000 && b > Date.parse('2026-10-18T12:00:00Z')) seen[b] = 1; });
+      CLOSES = Object.keys(seen).map(Number).sort(function (a, b) { return b - a; });
+      $('pick').innerHTML = CLOSES.map(function (b) { return '<option value="' + b + '">' + bkk(b) + (b > TEST0 ? ' · day ' + dayNo(b) : '') + '</option>'; }).join('');
+      var want = (location.search.match(/[?&]d=(\d{4}-\d{2}-\d{2})/) || [])[1], sel = CLOSES.filter(function (b) { return ymd(b) === want; })[0] || CLOSES[0];
+      if (!sel) { $('st').textContent = 'No closed batch yet.'; return; }
+      $('pick').value = sel; return render(sel);
+    });
+  }
+  function dayNo(b) { return CLOSES.filter(function (x) { return x > TEST0 && x <= b; }).length; }
+  function render(b) {
+    $('st').textContent = 'Building the report for the close of ' + bkk(b) + '...';
+    var rows = ALL.filter(function (p) { return deadline(p) === b; }), opened = Math.min.apply(null, rows.map(function (p) { return new Date(p.opened_at).getTime(); }));
+    return Promise.all([snap(opened), snap(b)]).then(function (sn) { draw(b, rows, opened, sn[0], sn[1]); });
+  }
+  function draw(b, rows, opened, A, Z) {
+    var stillOpen = rows.filter(function (p) { return p.status === 'open'; }).length, day = b > TEST0 ? dayNo(b) : null;
+    var moves = Object.keys(A).filter(function (c) { return Z[c]; }).map(function (c) { return (Z[c] / A[c] - 1) * 100; }), mv = med(moves), upN = moves.filter(function (x) { return x > 0; }).length, btc = A.BTC && Z.BTC ? (Z.BTC / A.BTC - 1) * 100 : null;
+    var kind = mv == null ? null : mv < -1 ? 'down' : mv > 1 ? 'up' : 'flat';
+    var desks = ORDER.filter(function (s) { return rows.some(function (p) { return p.coin.split(':')[1] === s; }); }).map(function (s) {
+      var ps = rows.filter(function (p) { return p.coin.split(':')[1] === s; }), closed = ps.filter(function (p) { return p.status === 'closed'; }), byCoin = {};
+      closed.forEach(function (p) { var c = p.coin.split(':')[0] + ' ' + p.side; byCoin[c] = (byCoin[c] || 0) + +p.pnl; });
+      var coins = Object.keys(byCoin).map(function (c) { return { c: c, v: byCoin[c] }; }).sort(function (x, y) { return y.v - x.v; });
+      var net = closed.reduce(function (t, p) { return t + +p.pnl; }, 0), fees = closed.reduce(function (t, p) { return t + feeEst(p); }, 0), stops = closed.filter(function (p) { return /stop|liquid/.test(p.close_reason || ''); }).length;
+      var cum = ALL.filter(function (p) { var d = deadline(p); return p.coin.split(':')[1] === s && p.status === 'closed' && d > TEST0 && d <= b; }).reduce(function (t, p) { return t + +p.pnl; }, 0);
+      return { s: s, name: NAMES[s], ps: ps, legs: coins.length, won: coins.filter(function (x) { return x.v > 0; }).length, net: net, fees: fees, stops: stops, best: coins[0], worst: coins[coins.length - 1], cum: cum, open: ps.length - closed.length };
+    }).sort(function (x, y) { return y.net - x.net; });
+    var tot = desks.reduce(function (t, d) { return t + d.net; }, 0), green = desks.filter(function (d) { return d.net > 0; }).length;
+    var legsAll = []; desks.forEach(function (d) { d.ps.forEach(function (p) { if (p.status === 'closed') legsAll.push({ d: d.name, p: p }); }); }); legsAll.sort(function (x, y) { return +y.p.pnl - +x.p.pnl; });
+    var get2 = function (s) { return desks.filter(function (d) { return d.s === s; })[0]; };
+    document.title = 'Autopilot daily report ' + ymd(b);
+    $('ttl').textContent = 'Daily report · close of ' + bkk(b) + ' Bangkok';
+    var h = '';
+    h += '<div class="sub">Batch opened ' + bkk(opened) + ' · closed ' + bkk(b) + (day ? ' · 30-day test day ' + day + ' of 30' : ' · before the 30-day restart') + (stillOpen ? ' · <b class="dn">' + stillOpen + ' leg(s) not closed yet</b>' : '') + '</div>';
+    h += '<div class="kpis"><div class="kpi"><div class="l">All daily desks</div><div class="v ' + cls(tot) + '">' + money(tot) + '</div><div class="s">' + green + ' of ' + desks.length + ' desks green</div></div>';
+    h += '<div class="kpi"><div class="l">Market move</div><div class="v ' + cls(mv || 0) + '">' + (mv == null ? '–' : pct(mv)) + '</div><div class="s">' + (kind ? '<span class="tag ' + kind + '">' + kind + '</span> ' : '') + (moves.length ? upN + ' up · ' + (moves.length - upN) + ' down' : 'no price samples') + '</div></div>';
+    h += '<div class="kpi"><div class="l">BTC</div><div class="v ' + cls(btc || 0) + '">' + (btc == null ? '–' : pct(btc)) + '</div><div class="s">open to close</div></div>';
+    if (desks[0]) h += '<div class="kpi"><div class="l">Best desk</div><div class="v gold">' + esc(desks[0].name) + '</div><div class="s ' + cls(desks[0].net) + '">' + money(desks[0].net) + '</div></div><div class="kpi"><div class="l">Worst desk</div><div class="v">' + esc(desks[desks.length - 1].name) + '</div><div class="s ' + cls(desks[desks.length - 1].net) + '">' + money(desks[desks.length - 1].net) + '</div></div>';
+    h += '</div>';
+    // highlights
+    var hl = [];
+    if (desks.length) hl.push('<b>' + esc(desks[0].name) + '</b> won the day with ' + money(desks[0].net) + '; <b>' + esc(desks[desks.length - 1].name) + '</b> was last with ' + money(desks[desks.length - 1].net) + '.');
+    if (mv != null) hl.push('The market was <b>' + kind + '</b> (median ' + pct(mv) + (btc != null ? ', BTC ' + pct(btc) : '') + '). Neutral desks earn from the gap between weak and strong coins, not from the direction.');
+    if (legsAll.length) { var bL = legsAll[0], wL = legsAll[legsAll.length - 1]; hl.push('Best single leg: ' + esc(bL.p.coin.split(':')[0]) + ' ' + bL.p.side.toLowerCase() + ' on ' + esc(bL.d) + ' ' + money(+bL.p.pnl) + '. Worst: ' + esc(wL.p.coin.split(':')[0]) + ' ' + wL.p.side.toLowerCase() + ' on ' + esc(wL.d) + ' ' + money(+wL.p.pnl) + '.'); }
+    var st = desks.reduce(function (t, d) { return t + d.stops; }, 0); if (st) hl.push(st + ' stop(s) hit across all desks.');
+    var r2 = get2('rev2'), rm = get2('revm'); if (r2 && rm) hl.push('Fee experiment: Rev 2 ' + money(r2.net) + ' (fees ~$' + r2.fees.toFixed(2) + ') vs Rev 2 limit ' + money(rm.net) + ' (fees ~$' + rm.fees.toFixed(2) + '). Fee saving ~$' + (r2.fees - rm.fees).toFixed(2) + '; the rest of the gap is different fills.');
+    var rx = get2('revx'); if (rx) hl.push('Reverse extremes: ' + (rx.best ? esc(rx.best.c) + ' ' + money(rx.best.v) : '') + (rx.worst && rx.worst !== rx.best ? ', ' + esc(rx.worst.c) + ' ' + money(rx.worst.v) : '') + ' → ' + money(rx.net) + '.');
+    var cp = get2('caprev'); if (!cp) hl.push('Capitulation Rev sat out (it only trades after the market fell 1%+ in 24h).');
+    h += '<h2>Highlights</h2><div class="card"><ul class="hl">' + hl.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>';
+    // desk table
+    h += '<h2>Desks, ranked by today\'s P&amp;L</h2><div class="scroll"><table class="rk"><tr><th>#</th><th>Desk</th><th>Coins</th><th>Won</th><th>Net P&amp;L</th><th>On $1,000</th><th>Fees (est.)</th><th>Stops</th><th>Best leg</th><th>Worst leg</th><th>Bank since restart</th></tr>';
+    desks.forEach(function (d, i) { var bank = BANK + d.cum;
+      h += '<tr><td>' + (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1) + '</td><td style="text-align:left"><b>' + esc(d.name) + '</b>' + (d.open ? ' <span class="dn">(' + d.open + ' open)</span>' : '') + '</td><td>' + d.legs + '</td><td>' + d.won + '/' + d.legs + '</td><td class="' + cls(d.net) + '"><b>' + money(d.net) + '</b></td><td class="' + cls(d.net) + '">' + pct(d.net / BANK * 100) + '</td><td>$' + d.fees.toFixed(2) + '</td><td>' + (d.stops || '–') + '</td><td class="up">' + (d.best && d.best.v > 0 ? esc(d.best.c) + ' ' + money(d.best.v) : '–') + '</td><td class="dn">' + (d.worst && d.worst.v < 0 ? esc(d.worst.c) + ' ' + money(d.worst.v) : '–') + '</td><td>' + (b > TEST0 ? '<b>$' + bank.toFixed(2) + '</b> <span class="' + cls(d.cum) + '">' + pct(d.cum / BANK * 100) + '</span>' : '<span class="mut">–</span>') + '</td></tr>'; });
+    h += '</table></div>';
+    // leaderboard since restart
+    if (b > TEST0) {
+      var lb = ORDER.map(function (s) { var c = ALL.filter(function (p) { var d = deadline(p); return p.coin.split(':')[1] === s && p.status === 'closed' && d > TEST0 && d <= b; }); if (!c.length) return null; var days = {}; c.forEach(function (p) { var k = deadline(p); days[k] = (days[k] || 0) + +p.pnl; }); var dv = Object.keys(days).map(function (k) { return days[k]; }); return { name: NAMES[s], cum: c.reduce(function (t, p) { return t + +p.pnl; }, 0), days: dv.length, green: dv.filter(function (v) { return v > 0; }).length, worst: Math.min.apply(null, dv) }; }).filter(Boolean).sort(function (x, y) { return y.cum - x.cum; });
+      h += '<h2>30-day test leaderboard (day ' + day + ' of 30)</h2><div class="scroll"><table class="rk"><tr><th>#</th><th>Desk</th><th>Bank</th><th>Since restart</th><th>Green days</th><th>Worst day</th></tr>' + lb.map(function (x, i) { return '<tr><td>' + (i + 1) + '</td><td style="text-align:left">' + esc(x.name) + '</td><td><b>$' + (BANK + x.cum).toFixed(2) + '</b></td><td class="' + cls(x.cum) + '">' + money(x.cum) + ' (' + pct(x.cum / BANK * 100) + ')</td><td>' + x.green + '/' + x.days + '</td><td class="' + cls(x.worst) + '">' + money(x.worst) + '</td></tr>'; }).join('') + '</table></div>';
+    }
+    // my picks
+    if (PICKS.length) {
+      var pr = PICKS.filter(function (p) { return new Date(p.opened_at).getTime() <= b; }), real = 0, unr = 0, miss = 0, by = {};
+      pr.forEach(function (p) { var c = p.coin.split(':')[0], o = by[c] = by[c] || { c: c, n: 0, entries: 0, val: 0, known: true }; o.entries++; o.n += +p.notional;
+        if (p.status === 'closed' && new Date(p.closed_at).getTime() <= b) { real += +p.pnl; o.val += +p.pnl; } else { var z = Z[c]; if (z) { var u = +p.notional * (z / +p.entry_price - 1); unr += u; o.val += u; } else { o.known = false; miss++; } } });
+      var pl = Object.keys(by).map(function (k) { return by[k]; }).sort(function (x, y) { return y.val - x.val; });
+      h += '<h2>My picks at the close (20 coins, 3x, held)</h2><div class="kpis"><div class="kpi"><div class="l">Open P&amp;L at close</div><div class="v ' + cls(unr) + '">' + money(unr) + '</div><div class="s">' + (miss ? miss + ' position(s) without a price sample' : 'before fees and funding') + '</div></div><div class="kpi"><div class="l">Realized</div><div class="v ' + cls(real) + '">' + money(real) + '</div><div class="s">liquidations / closed</div></div><div class="kpi"><div class="l">Value of $5,000 margin</div><div class="v">$' + (5000 + real + unr).toFixed(2) + '</div><div class="s">plus any add-on margin</div></div></div>';
+      h += '<div class="scroll" style="margin-top:8px"><table><tr><th>Coin</th><th>Entries</th><th>Position</th><th>P&amp;L at close</th></tr>' + pl.map(function (o) { return '<tr><td>' + esc(o.c) + '</td><td>' + o.entries + '</td><td>$' + o.n.toFixed(0) + '</td><td class="' + (o.known ? cls(o.val) : 'mut') + '">' + (o.known ? money(o.val) : 'no sample') + '</td></tr>'; }).join('') + '</table></div>';
+    }
+    // leg detail
+    h += '<h2>Every leg, by desk</h2>';
+    desks.forEach(function (d) {
+      var ps = d.ps.slice().sort(function (x, y) { return (+y.pnl || 0) - (+x.pnl || 0); });
+      h += '<div class="desk"><h3>' + esc(d.name) + ' <span class="' + cls(d.net) + '">' + money(d.net) + '</span></h3><div class="scroll"><table><tr><th>Coin</th><th>Side</th><th>Size</th><th>Entry</th><th>Exit</th><th>Move</th><th>P&amp;L</th><th>Why closed</th></tr>' + ps.map(function (p) { var e = +p.entry_price, x = +p.exit_price, mvp = p.status === 'closed' && e ? (p.side === 'LONG' ? 1 : -1) * (x / e - 1) * 100 : null;
+        return '<tr><td>' + esc(p.coin.split(':')[0]) + '</td><td>' + (p.side === 'LONG' ? '<span class="up">long</span>' : '<span class="dn">short</span>') + '</td><td>$' + (+p.notional).toFixed(0) + '</td><td>' + e + '</td><td>' + (p.status === 'closed' ? x : '<span class="mut">open</span>') + '</td><td class="' + cls(mvp || 0) + '">' + (mvp == null ? '–' : pct(mvp)) + '</td><td class="' + cls(+p.pnl || 0) + '">' + (p.status === 'closed' ? money(+p.pnl) : '–') + '</td><td class="mut" style="text-align:left">' + esc(/^so-/.test(p.close_reason || '') ? 'scale-out state' : p.close_reason || '') + '</td></tr>'; }).join('') + '</table></div></div>';
+    });
+    $('out').innerHTML = h;
+    $('st').textContent = 'Report generated ' + bkk(Date.now()) + ' Bangkok from live paper-trading data.';
+  }
+  $('pick').onchange = function () { var b = +this.value; try { history.replaceState(null, '', '?d=' + ymd(b)); } catch (e) {} render(b).catch(function (e) { $('st').textContent = 'Could not load: ' + e.message; }); };
+  $('pdf').onclick = function () { window.print(); };
+  load().catch(function (e) { $('st').textContent = 'Could not load: ' + e.message; });
+})();
+</script>
+</body>
+</html>
