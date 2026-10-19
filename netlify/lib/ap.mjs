@@ -927,6 +927,41 @@ export async function carryTick(db, ctl, now = Date.now()) {
 }
 
 const shared0Breadth = (rows) => rows.filter((r) => r.F.ret_60m < 0).length / Math.max(1, rows.length);
+/* :sig AI signals, PAPER (Koko's old "Volume Harvester" n8n bot, rebuilt as a tracked paper desk). Every 30 minutes Claude reads 24h stats for 8 liquid coins
+   and proposes up to 3 scalps with the old rules: SL 0.2-0.4% away, TP 0.4-0.7% away, TP at least 1.5x SL, leverage max 3x, skip coins that moved more than 6% in 24h.
+   Each valid signal opens at the live price (the TP/SL distances are kept, re-based on the real entry), $100 margin x the signal's leverage, taker fees both ways,
+   funding booked at close, stop checked before take profit inside the same minute (conservative), 24h time limit. One open signal per coin. Paper only: nothing is sent to an exchange. */
+export const SIG = { coins: ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'AVAX', 'DOGE', 'ARB'], margin: 100, maxLev: 3, slMin: 0.2, slMax: 0.4, tpMin: 0.4, tpMax: 0.7, rrMin: 1.5, holdH: 24, everyMin: 30 };
+export function sigValid(s) {
+  const e = +s.entry, sl = +s.sl, tp = +s.tp, dir = s.direction === 'LONG' ? 1 : s.direction === 'SHORT' ? -1 : 0;
+  if (!dir || !(e > 0) || !(sl > 0) || !(tp > 0)) return null;
+  const slPct = (dir * (e - sl)) / e * 100, tpPct = (dir * (tp - e)) / e * 100;
+  if (slPct < SIG.slMin || slPct > SIG.slMax || tpPct < SIG.tpMin || tpPct > SIG.tpMax || tpPct < slPct * SIG.rrMin) return null;
+  return { dir, slPct, tpPct, lev: Math.max(1, Math.min(SIG.maxLev, Math.round(+s.leverage) || 1)) };
+}
+export async function sigTick(db, rows, openPos, ctl, env, now = Date.now()) {
+  const out = [];
+  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' ' + x.why + ' ' + x.pnl.toFixed(2)); } }
+  if (now % (SIG.everyMin * 60000) >= 5 * 60000 || ctlBlocks(ctl, 'sig', '') || !env.ANTHROPIC_API_KEY) return out; // one run per 30-minute window
+  const tk = {}; for (const t of await okx('/api/v5/market/tickers?instType=SWAP')) tk[t.instId] = t;
+  let msg = 'Watchlist (24h stats)\n\n';
+  for (const c of SIG.coins) { const t = tk[c + '-USDT-SWAP']; if (!t) continue; const last = +t.last, o = +t.open24h, hi = +t.high24h, lo = +t.low24h;
+    msg += c + 'USDT\nPrice: $' + last + '\n24h: ' + ((last / o - 1) * 100).toFixed(2) + '%\n24h Range: ' + ((hi - lo) / lo * 100).toFixed(2) + '%\nVolume: $' + (+t.volCcy24h * last / 1e6).toFixed(0) + 'M\n\n'; }
+  const prompt = 'You are a high-frequency crypto scanner.\n\nRULES:\n- TP distance must be between 0.4% and 0.7% from entry\n- SL distance must be between 0.2% and 0.4% from entry\n- TP must be at least 1.5x SL distance\n- Leverage: max 3x\n- Max 3 setups per run\n- Confidence 5 or higher\n- Both LONG and SHORT allowed\n- Match direction to short-term momentum\n- Skip extremely volatile (24h move above 6%)\n\nOUTPUT: JSON array only.\nFormat: [{"symbol":"BTCUSDT","direction":"LONG","entry":78000,"sl":77766,"tp":78390,"leverage":3,"confidence":6,"reason":"brief"}]\n\nIf nothing qualifies: []\n\nData:\n' + msg;
+  let arr = [];
+  try { const text = await claude(env.ANTHROPIC_API_KEY, { max_tokens: 800, messages: [{ role: 'user', content: prompt }] }); const a = text.indexOf('['), b = text.lastIndexOf(']'); if (a >= 0 && b > a) arr = JSON.parse(text.slice(a, b + 1)); } catch (e) { out.push('sig claude error ' + String(e.message).slice(0, 60)); return out; }
+  for (const s of (Array.isArray(arr) ? arr : []).slice(0, 3)) {
+    const coin = String(s.symbol || '').replace(/USDT$/, '').toUpperCase(), v = sigValid(s), r = rows.find((x) => x.coin === coin);
+    if (!SIG.coins.includes(coin)) continue;
+    if (!v) { out.push('sig rejected ' + coin + ' (outside the TP/SL rules)'); continue; }
+    if (!r || openPos.some((p) => p.coin === coin + ':sig') || (ctl && ctl.coinsOff && ctl.coinsOff[coin])) continue;
+    const px = r.m.price, d = decFor(px) + 2, notional = SIG.margin * v.lev;
+    await db.insert('ap_positions', { coin: coin + ':sig', side: v.dir > 0 ? 'LONG' : 'SHORT', entry_price: px, size: notional / px, notional, tp: +(px * (1 + v.dir * v.tpPct / 100)).toFixed(d), sl: +(px * (1 - v.dir * v.slPct / 100)).toFixed(d), max_hold_until: new Date(now + SIG.holdH * 3600e3).toISOString(), close_reason: 'sig: conf ' + (+s.confidence || 0) + ' · ' + String(s.reason || '').slice(0, 120) });
+    out.push('sig opened ' + (v.dir > 0 ? 'LONG ' : 'SHORT ') + coin + ' ' + v.lev + 'x TP +' + v.tpPct.toFixed(2) + '% SL -' + v.slPct.toFixed(2) + '%');
+  }
+  return out;
+}
+
 export async function tickAll(env) {
   if (!env.SUPABASE_SERVICE_KEY || !env.ANTHROPIC_API_KEY) return [{ skipped: 'missing keys' }];
   const { rows, db } = await scanAll(env);
@@ -965,6 +1000,7 @@ export async function tickAll(env) {
   const dfcRes = await dfcTick(db, ctl).catch((e) => ['dfc error ' + String(e.message || e).slice(0, 80)]);
   const revwRes = await revVariantTick(db, rows, openRevw, ctl, 'revw').catch((e) => ['revw error ' + String(e.message || e).slice(0, 60)]);
   const rev2sRes = await rev2Tick(db, rows, openRev2s, ctl, 'rev2s').catch((e) => ['rev2s error ' + String(e.message || e).slice(0, 60)]);
+  const sigRes = await sigTick(db, rows, openAll.filter((p) => p.coin.endsWith(':sig')), ctl, env).catch((e) => ['sig error ' + String(e.message || e).slice(0, 60)]);
   const revxRes = await revxTick(db, rows, openRevx, ctl).catch((e) => ['revx error ' + String(e.message || e).slice(0, 60)]);
   const pickRes = await picksTick(db, ctl).catch((e) => ['pick error ' + String(e.message || e).slice(0, 80)]);
   const revsRes = await revVariantTick(db, rows, openRevs, ctl, 'revs').catch((e) => ['revs error ' + String(e.message || e).slice(0, 60)]);
@@ -988,7 +1024,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, sig: sigRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */

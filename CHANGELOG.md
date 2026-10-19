@@ -62,6 +62,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.51
+- New paper desk: AI signals (your old Volume Harvester bot rebuilt and tracked): Claude proposes up to 3 scalps every 30 min, TP 0.4-0.7%, SL 0.2-0.4%, max 3x, $100 margin, real taker fees and funding, 24h limit
+
 ## v1.50
 - New: Live page (live.html) and KuCoin order service for My picks: your own Tokyo server (live/server.mjs, one-command live/install.sh), dry run by default, up to 10 coins at $25 x 3 isolated, -20% safety pause, close one or all from the page
 
