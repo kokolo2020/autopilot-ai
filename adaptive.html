@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot Adaptive Study</title>
+<style>
+  :root { --bg:#0b0f14; --card:#121922; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --acc:#6aa9ff; --up:#3ddc97; --dn:#ff6b6b; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f4f6f9; --card:#fff; --line:#dde3ea; --text:#17202b; --mut:#5b6b7d; --acc:#2c6fd6; --up:#1a8f5f; --dn:#c0392b; } }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:980px; margin:0 auto; padding:16px; } h1 { font-size:20px; margin:0 0 4px; } h2 { font-size:15px; margin:24px 0 6px; } .sub, .mut { color:var(--mut); font-size:12px; } a { color:var(--acc); }
+  .scroll { overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--card); } table { border-collapse:collapse; width:100%; font-size:13px; white-space:nowrap; }
+  th, td { padding:7px 10px; text-align:right; border-bottom:1px solid var(--line); } th:first-child, td:first-child { text-align:left; } th { color:var(--mut); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; } tr:last-child td { border-bottom:0; }
+  .up { color:var(--up); } .dn { color:var(--dn); } .best { background:rgba(61,220,151,.14); font-weight:700; }
+  button { font:600 13px system-ui; border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:999px; padding:6px 14px; cursor:pointer; margin-right:6px; }
+  .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin:8px 0; } .bar i { display:block; height:100%; width:0; background:var(--acc); transition:width .2s; }
+  pre { white-space:pre-wrap; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; font-size:12px; }
+  canvas { width:100%; height:300px; display:block; background:var(--card); border:1px solid var(--line); border-radius:12px; } .lg { display:flex; flex-wrap:wrap; gap:12px; font-size:12px; margin:6px 0; } .lg i { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:5px; border-radius:2px; } .pill { display:inline-block; padding:2px 10px; border-radius:999px; font-weight:700; font-size:12px; } .pill.bull { background:rgba(61,220,151,.15); color:var(--up); } .pill.bear { background:rgba(255,107,107,.15); color:var(--dn); } .pill.chop { background:rgba(139,152,168,.2); color:var(--mut); } .pill.panic { background:rgba(245,196,81,.2); color:#c99a1e; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Round 3: strategies that switch with the market</h1>
+  <div class="sub">Each day at the 07:00 close the market is put into one of four regimes (Bull, Bear, Chop, Panic) from BTC's trend and breadth. Every candidate strategy is tested inside every regime, then a switching system picks one strategy per regime. The rules are chosen on the years up to 2023 (2022 and 2023, after a 200-day warm-up) and checked on 2024 to 2026, which they never saw. Daily OKX history, about 40 coins. Nothing here trades.</div>
+  <div style="margin:12px 0"><button id="go" type="button">Run the study</button><button id="cp" type="button" style="display:none">Copy results</button> <label class="mut">Fee per side: <select id="fee"><option value="0.055" selected>0.055% (taker)</option><option value="0.02">0.02% (maker)</option></select></label></div>
+  <div class="bar"><i id="pb"></i></div><div class="sub" id="st">Press the button. Downloads about 5 years of daily candles (1 to 2 minutes, cached 12 hours, shared with the History study), then calculates in your browser.</div>
+  <div id="out"></div>
+  <p class="mut">Rules, fixed before the test. <b>Regime</b> at each close: <b>Panic</b> = the average coin fell 3% or more that day; Panic lasts that day and the 2 days after (the dip-buy hold), and overrides the other regimes. <b>Bull</b> = BTC above its 200-day average, BTC up over 30 days, and at least half the coins above their own 50-day average. <b>Bear</b> = BTC below its 200-day average, BTC down over 30 days, and fewer than half above their 50-day average. Otherwise <b>Chop</b>. A Bull/Bear/Chop change only counts after 3 days in a row. <b>Money</b>: one $1,000 desk trading $5,000 of positions (5x, like the live desks), fees on every change of position, no funding (spot history), decisions use only data up to that close. <b>Caveats</b>: today's surviving coins only; long-only strategies at 5x can lose the whole desk in a crash, which is why worst drawdown is shown. <a href="/study.html">History study</a> · <a href="/study8h.html">8h study</a> · <a href="/research">Back to research</a></p>
+</div>
+<script>
+(function () {
+  var COINS = ['BTC', 'ETH', 'XRP', 'SOL', 'BNB', 'DOGE', 'ADA', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH', 'UNI', 'ATOM', 'NEAR', 'OP', 'ARB', 'INJ', 'FIL', 'AAVE', 'ETC', 'XLM', 'TRX', 'HBAR', 'RUNE', 'ALGO', 'APT', 'SUI', 'TIA', 'WLD', 'JUP', 'EGLD', 'CRV', 'MKR', 'SAND', 'MANA', 'APE', 'AXS', 'GRT', 'LDO'], PAGES = 19, DAY = 86400000, NOTIONAL = 5000, TRAIN_END = 2023;
+  var $ = function (i) { return document.getElementById(i); }, cls = function (n) { return n < 0 ? 'dn' : n > 0 ? 'up' : ''; }, usd = function (n) { return (n < 0 ? '-$' : '+$') + Math.abs(n).toFixed(Math.abs(n) >= 100 ? 0 : 2); };
+  var mean = function (a) { return a.length ? a.reduce(function (s, x) { return s + x; }, 0) / a.length : NaN; };
+  var text = '', CACHE = null;
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function fetchCoin(c) {
+    var out = {}, after = '', n = 0;
+    function page() {
+      return fetch('/.netlify/functions/okx-hist?inst=' + c + '-USDT' + (after ? '&after=' + after : '')).then(function (r) { return r.json(); }).then(function (j) {
+        var d = j.data || []; d.forEach(function (k) { out[Math.floor(+k[0] / DAY)] = +k[4]; });
+        if (d.length < 100 || ++n >= PAGES) return out; after = d[d.length - 1][0]; return sleep(230).then(page);
+      }).catch(function () { return out; });
+    }
+    return page();
+  }
+  var STRATS = [
+    ['cash', 'Cash'], ['rev', 'Neutral Rev (daily 5L/5S reversal)'], ['mkt', 'Long all coins'], ['btc', 'Long BTC'], ['short', 'Short all coins'],
+    ['momls', 'Momentum L/S (weekly, 30d)'], ['moml', 'Momentum long-only (weekly)'], ['moms', 'Momentum short-only (weekly)'], ['dip', 'Dip buy (after -3% day, 3 days)'], ['brk', 'Breakout (20d high, exit 10d low)']
+  ];
+  var SN = {}; STRATS.forEach(function (s) { SN[s[0]] = s[1]; });
+  var REG = ['bull', 'bear', 'chop', 'panic'], RN = { bull: 'Bull', bear: 'Bear', chop: 'Chop', panic: 'Panic' };
+  var PRESET = { bull: 'moml', bear: 'moms', chop: 'cash', panic: 'dip' };
+  function prep(data) {
+    var btc = data.BTC; if (!btc) throw new Error('No BTC history');
+    var ks = Object.keys(btc).map(Number).sort(function (a, b) { return a - b; }), D0 = ks[0], N = ks[ks.length - 1] - D0 + 1, names = Object.keys(data), P = {};
+    names.forEach(function (c) { var a = new Array(N); for (var i = 0; i < N; i++) { var v = data[c][D0 + i]; a[i] = v > 0 ? v : null; } P[c] = a; });
+    var F = {}; // per-coin features
+    names.forEach(function (c) {
+      var a = P[c], r1 = new Array(N), r30 = new Array(N), s50 = new Array(N), s200 = new Array(N), hi20 = new Array(N), lo10 = new Array(N), sum = 0, cnt = 0, sum2 = 0, cnt2 = 0;
+      for (var i = 0; i < N; i++) {
+        r1[i] = i && a[i] && a[i - 1] ? a[i] / a[i - 1] - 1 : null; r30[i] = i >= 30 && a[i] && a[i - 30] ? a[i] / a[i - 30] - 1 : null;
+        if (a[i]) { sum += a[i]; cnt++; } if (i >= 50 && a[i - 50]) { sum -= a[i - 50]; cnt--; } s50[i] = cnt === 50 ? sum / 50 : null;
+        if (a[i]) { sum2 += a[i]; cnt2++; } if (i >= 200 && a[i - 200]) { sum2 -= a[i - 200]; cnt2--; } s200[i] = cnt2 === 200 ? sum2 / 200 : null;
+        var h = null, l = null, ok = i >= 20; for (var k = i - 20; ok && k < i; k++) { if (!a[k]) { ok = false; break; } h = h == null ? a[k] : Math.max(h, a[k]); if (k >= i - 10) l = l == null ? a[k] : Math.min(l, a[k]); } hi20[i] = ok ? h : null; lo10[i] = ok ? l : null;
+      }
+      F[c] = { r1: r1, r30: r30, s50: s50, s200: s200, hi20: hi20, lo10: lo10 };
+    });
+    var raw = new Array(N), reg = new Array(N), mk1 = new Array(N), br = new Array(N), conf = null, info = new Array(N);
+    for (var i = 0; i < N; i++) {
+      var rs = [], above = 0, tot = 0;
+      names.forEach(function (c) { var f = F[c]; if (f.r1[i] != null) rs.push(f.r1[i]); if (P[c][i] && f.s50[i]) { tot++; if (P[c][i] > f.s50[i]) above++; } });
+      mk1[i] = rs.length >= 10 ? mean(rs) * 100 : null; br[i] = tot >= 10 ? above / tot : null;
+      var b = P.BTC[i], fb = F.BTC; if (!b || !fb.s200[i] || fb.r30[i] == null || br[i] == null || mk1[i] == null) continue;
+      raw[i] = b > fb.s200[i] && fb.r30[i] > 0 && br[i] >= 0.5 ? 'bull' : b < fb.s200[i] && fb.r30[i] < 0 && br[i] < 0.5 ? 'bear' : 'chop';
+      if (conf == null) conf = raw[i]; else if (raw[i] !== conf && raw[i - 1] === raw[i] && raw[i - 2] === raw[i]) conf = raw[i];
+      reg[i] = [0, 1, 2].some(function (k) { return i - k >= 0 && mk1[i - k] != null && mk1[i - k] <= -3; }) ? 'panic' : conf; // panic lasts the day of a -3% market and the 2 days after (the dip-buy hold)
+      info[i] = { btc: b, s200: fb.s200[i], r30: fb.r30[i] * 100, br: br[i] * 100, mk1: mk1[i], raw: raw[i] };
+    }
+    return { D0: D0, N: N, names: names, P: P, F: F, reg: reg, mk1: mk1, info: info };
+  }
+  /* weights for strategy s at day i; prev = previous weights of this same strategy run, st = per-strategy state */
+  function avail(X, i) { return X.names.filter(function (c) { return X.P[c][i] && X.P[c][i + 1]; }); }
+  function eq(list, w) { var o = {}; list.forEach(function (c) { o[c] = w; }); return o; }
+  function target(X, s, i, prev, st, fresh) {
+    var A = avail(X, i), F = X.F; if (A.length < 10) return {};
+    var by = function (key) { return A.filter(function (c) { return F[c][key][i] != null; }).sort(function (a, b) { return F[a][key][i] - F[b][key][i]; }); };
+    if (s === 'cash') return {};
+    if (s === 'btc') return X.P.BTC[i + 1] ? { BTC: 1 } : {};
+    if (s === 'mkt') return eq(A, 1 / A.length);
+    if (s === 'short') return eq(A, -1 / A.length);
+    if (s === 'rev') { var r = by('r1'); if (r.length < 10) return {}; var o = eq(r.slice(0, 5), 0.1); r.slice(-5).forEach(function (c) { o[c] = -0.1; }); return o; }
+    if (s === 'momls' || s === 'moml' || s === 'moms') {
+      if (!fresh && st.last != null && i - st.last < 7 && prev) { var keep = {}; Object.keys(prev).forEach(function (c) { if (X.P[c][i + 1]) keep[c] = prev[c]; }); return keep; }
+      var m = by('r30'); if (m.length < 10) return {}; st.last = i;
+      if (s === 'moml') return eq(m.slice(-5), 0.2); if (s === 'moms') return eq(m.slice(0, 5), -0.2);
+      var o2 = eq(m.slice(-5), 0.1); m.slice(0, 5).forEach(function (c) { o2[c] = -0.1; }); return o2;
+    }
+    if (s === 'dip') {
+      if (X.mk1[i] != null && X.mk1[i] <= -3) { var d = by('r1'); st.until = i + 3; st.w = eq(d.slice(0, 5), 0.2); return st.w; }
+      if (!fresh && st.until != null && i < st.until && st.w) { var k2 = {}; Object.keys(st.w).forEach(function (c) { if (X.P[c][i + 1]) k2[c] = st.w[c]; }); return k2; }
+      return {};
+    }
+    if (s === 'brk') {
+      st.in = st.in || {}; var inn = [];
+      A.forEach(function (c) { var p = X.P[c][i], f = F[c]; if (f.hi20[i] == null) { st.in[c] = false; return; } if (st.in[c] && p < f.lo10[i]) st.in[c] = false; else if (!st.in[c] && p > f.hi20[i]) st.in[c] = true; if (st.in[c]) inn.push(c); });
+      inn.sort(function (a, b) { return (F[b].r30[i] || 0) - (F[a].r30[i] || 0); }); return eq(inn.slice(0, 10), 0.1);
+    }
+    return {};
+  }
+  /* run a system: pick(i) -> strategy name. Returns daily pnl (fraction of NOTIONAL, after fees) for day i -> i+1 */
+  function run(X, pick, fee) {
+    var pnl = new Array(X.N).fill(null), W = {}, states = {}, prevS = null, lastW = {};
+    STRATS.forEach(function (s) { states[s[0]] = {}; });
+    for (var i = 0; i < X.N - 1; i++) {
+      if (!X.reg[i]) continue;
+      if (pick(i) !== 'brk') target(X, 'brk', i, null, states.brk, false); // keep breakout signals up to date even while another strategy runs
+      var s = pick(i), fresh = s !== prevS, w = target(X, s, i, fresh ? null : lastW[s], states[s], fresh); lastW[s] = w; prevS = s;
+      var turn = 0, keys = {}; Object.keys(W).forEach(function (c) { keys[c] = 1; }); Object.keys(w).forEach(function (c) { keys[c] = 1; });
+      Object.keys(keys).forEach(function (c) { turn += Math.abs((w[c] || 0) - (W[c] || 0)); });
+      var g = 0; Object.keys(w).forEach(function (c) { var a = X.P[c][i], b = X.P[c][i + 1]; if (a && b) g += w[c] * (b / a - 1); });
+      pnl[i] = g - turn * fee; W = w;
+    }
+    return pnl;
+  }
+  var yr = function (X, i) { return new Date((X.D0 + i) * DAY).getUTCFullYear(); }, mo = function (X, i) { return new Date((X.D0 + i) * DAY).toISOString().slice(0, 7); };
+  function stats(X, pnl, from, to) {
+    var cum = 0, peak = 0, dd = 0, days = 0, months = {}, years = {};
+    for (var i = 0; i < X.N; i++) { if (pnl[i] == null) continue; var y = yr(X, i); if ((from && y < from) || (to && y > to)) continue; var v = pnl[i] * NOTIONAL; cum += v; days++; peak = Math.max(peak, cum); dd = Math.min(dd, cum - peak); var m = mo(X, i); months[m] = (months[m] || 0) + v; years[y] = (years[y] || 0) + v; }
+    var mv = Object.keys(months).map(function (k) { return months[k]; });
+    return { total: cum, perYear: days ? cum / days * 365 : 0, dd: dd, days: days, green: mv.length ? mv.filter(function (v) { return v > 0; }).length / mv.length * 100 : 0, years: years };
+  }
+  function analyse(data, fee) {
+    var X = prep(data), series = {};
+    STRATS.forEach(function (s) { series[s[0]] = run(X, function () { return s[0]; }, fee); });
+    // grid: $/day per regime, train and test, years positive
+    var grid = {}, best = {};
+    REG.forEach(function (R) {
+      grid[R] = {}; var bv = -Infinity;
+      STRATS.forEach(function (s) {
+        var a = series[s[0]], all = [], tr = [], te = [], ys = {};
+        for (var i = 0; i < X.N; i++) if (X.reg[i] === R && a[i] != null) { var v = a[i] * NOTIONAL, y = yr(X, i); all.push(v); (y <= TRAIN_END ? tr : te).push(v); ys[y] = ys[y] || []; ys[y].push(v); }
+        var yk = Object.keys(ys).filter(function (y) { return ys[y].length >= 10; }), pos = yk.filter(function (y) { return mean(ys[y]) > 0; }).length;
+        grid[R][s[0]] = { all: mean(all), tr: mean(tr), te: mean(te), n: all.length, ntr: tr.length, nte: te.length, pos: pos, ny: yk.length };
+        if (tr.length >= 15 && mean(tr) > bv) { bv = mean(tr); best[R] = s[0]; }
+      });
+      if (!best[R]) best[R] = 'cash';
+    });
+    var sys = {
+      preset: run(X, function (i) { return PRESET[X.reg[i]]; }, fee),
+      trained: run(X, function (i) { return best[X.reg[i]]; }, fee)
+    };
+    return { X: X, series: series, grid: grid, best: best, sys: sys };
+  }
+  function chart(R) {
+    var cv = $('eq'), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = 300; cv.width = W * dpr; cv.height = H * dpr; var x = cv.getContext('2d'); x.scale(dpr, dpr);
+    var X = R.X, lines = [['Pre-set playbook', R.sys.preset, '#f5c451'], ['Trained switcher', R.sys.trained, '#6aa9ff'], ['Neutral Rev', R.series.rev, '#ff6b6b'], ['Long all coins', R.series.mkt, '#3ddc97'], ['Long BTC', R.series.btc, '#b18cff']];
+    var cs = lines.map(function (l) { var c = 0, o = []; for (var i = 0; i < X.N; i++) { if (l[1][i] == null) continue; c += l[1][i] * NOTIONAL; o.push([i, c]); } return o; });
+    var all = [].concat.apply([], cs), xs = all.map(function (p) { return p[0]; }), ys = all.map(function (p) { return p[1]; }).concat([0]);
+    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), lo = Math.min.apply(null, ys), hi = Math.max.apply(null, ys), pad = 34, mut = getComputedStyle(document.documentElement).getPropertyValue('--mut'), line = getComputedStyle(document.documentElement).getPropertyValue('--line');
+    var X_ = function (i) { return pad + (i - x0) / (x1 - x0 || 1) * (W - pad - 8); }, Y = function (v) { return 10 + (hi - v) / (hi - lo || 1) * (H - 30); };
+    x.strokeStyle = line; x.lineWidth = 1; x.beginPath(); x.moveTo(pad, Y(0)); x.lineTo(W - 8, Y(0)); x.stroke();
+    x.fillStyle = mut; x.font = '11px system-ui'; x.fillText(usd(hi), 2, Y(hi) + 4); x.fillText(usd(lo), 2, Y(lo)); x.fillText('$0', 2, Y(0) + 4);
+    var tr = null; for (var i = x0; i <= x1; i++) if (yr(X, i) > TRAIN_END) { tr = i; break; }
+    if (tr != null) { x.setLineDash([4, 4]); x.beginPath(); x.moveTo(X_(tr), 6); x.lineTo(X_(tr), H - 18); x.stroke(); x.setLineDash([]); x.fillText('test period from 2024 →', X_(tr) + 4, 18); }
+    for (var y = yr(X, x0); y <= yr(X, x1); y++) { var d = Date.UTC(y, 0, 1) / DAY - X.D0; if (d > x0) x.fillText(String(y), X_(d) - 12, H - 6); }
+    cs.forEach(function (o, k) { x.strokeStyle = lines[k][2]; x.lineWidth = k < 2 ? 2.2 : 1.2; x.beginPath(); o.forEach(function (p, j) { if (j) x.lineTo(X_(p[0]), Y(p[1])); else x.moveTo(X_(p[0]), Y(p[1])); }); x.stroke(); });
+    $('lg').innerHTML = lines.map(function (l) { return '<span><i style="background:' + l[2] + '"></i>' + l[0] + '</span>'; }).join('');
+  }
+  function summarise(R, fee) {
+    var X = R.X, h = '', t = '', last = X.N - 1; while (last > 0 && !X.reg[last]) last--;
+    var inf = X.info[last], d0 = new Date((X.D0 + 200) * DAY).toISOString().slice(0, 10), d1 = new Date((X.D0 + last) * DAY).toISOString().slice(0, 10);
+    t += 'ROUND 3 ADAPTIVE ' + d0 + ' to ' + d1 + ', ' + X.names.length + ' coins, fee ' + (fee * 100) + '% per side, $1,000 desk with $5,000 positions\n';
+    h += '<h2>Today\'s regime (close of ' + d1 + ')</h2><div class="sub" style="font-size:14px"><span class="pill ' + X.reg[last] + '">' + RN[X.reg[last]] + '</span> &nbsp;BTC ' + (inf.btc > inf.s200 ? 'above' : 'below') + ' its 200-day average · BTC 30 days ' + (inf.r30 >= 0 ? '+' : '') + inf.r30.toFixed(1) + '% · ' + inf.br.toFixed(0) + '% of coins above their 50-day average · market today ' + (inf.mk1 >= 0 ? '+' : '') + inf.mk1.toFixed(2) + '%' + (inf.raw !== X.reg[last] && X.reg[last] !== 'panic' ? ' · raw signal says ' + RN[inf.raw] + ' (needs 3 days to switch)' : '') + '</div>';
+    t += 'today: ' + X.reg[last] + ' | BTC vs 200d ' + (inf.btc > inf.s200 ? 'above' : 'below') + ', BTC 30d ' + inf.r30.toFixed(1) + '%, breadth ' + inf.br.toFixed(0) + '%, market today ' + inf.mk1.toFixed(2) + '%\n';
+    // A: calendar
+    var cal = {}; for (var i = 0; i < X.N; i++) if (X.reg[i]) { var y = yr(X, i); cal[y] = cal[y] || { bull: 0, bear: 0, chop: 0, panic: 0 }; cal[y][X.reg[i]]++; }
+    h += '<h2>A. Days in each regime</h2><div class="scroll"><table><tr><th>Year</th>' + REG.map(function (r) { return '<th>' + RN[r] + '</th>'; }).join('') + '</tr>' + Object.keys(cal).map(function (y) { return '<tr><td>' + y + (y <= TRAIN_END ? ' <span class="mut">train</span>' : ' <span class="mut">test</span>') + '</td>' + REG.map(function (r) { return '<td>' + cal[y][r] + '</td>'; }).join('') + '</tr>'; }).join('') + '</table></div>';
+    t += 'A) days per regime by year (bull/bear/chop/panic): ' + Object.keys(cal).map(function (y) { return y + ' ' + REG.map(function (r) { return cal[y][r]; }).join('/'); }).join(', ') + '\n';
+    // B: grid
+    h += '<h2>B. Every strategy in every regime: $ per day on the $1,000 desk, after fees</h2><div class="sub">Each cell: whole period, then <b>train (2021-23) / test (2024-26)</b>, then years positive. Green = makes money. The ★ is what the trained switcher picked from the train years only.</div>';
+    h += '<div class="scroll"><table><tr><th>Strategy</th>' + REG.map(function (r) { return '<th>' + RN[r] + '</th>'; }).join('') + '</tr>'; t += 'B) $/day per regime: all (train/test) yearsPositive\n';
+    STRATS.forEach(function (s) {
+      h += '<tr><td>' + s[1] + '</td>' + REG.map(function (r) { var g = R.grid[r][s[0]], star = R.best[r] === s[0] ? ' ★' : ''; return '<td class="' + cls(g.all) + '"><b>' + usd(g.all) + '</b>' + star + '<br><span class="mut">' + (isFinite(g.tr) ? usd(g.tr) : '–') + ' / ' + (isFinite(g.te) ? usd(g.te) : '–') + ' · ' + g.pos + '/' + g.ny + ' yrs</span></td>'; }).join('') + '</tr>';
+      t += s[1] + ' | ' + REG.map(function (r) { var g = R.grid[r][s[0]]; return r + ' ' + usd(g.all) + ' (' + (isFinite(g.tr) ? usd(g.tr) : '-') + '/' + (isFinite(g.te) ? usd(g.te) : '-') + ') ' + g.pos + '/' + g.ny; }).join(' ; ') + '\n';
+    });
+    h += '<tr><td class="mut">Days in regime (train / test)</td>' + REG.map(function (r) { var g = R.grid[r].cash; return '<td class="mut">' + g.n + ' (' + g.ntr + ' / ' + g.nte + ')</td>'; }).join('') + '</tr></table></div>';
+    // C: systems
+    var sysL = [['Pre-set playbook (bull: momentum long, bear: momentum short, chop: cash, panic: dip buy)', R.sys.preset], ['Trained switcher (' + REG.map(function (r) { return RN[r] + ': ' + SN[R.best[r]].split(' (')[0]; }).join(', ') + ')', R.sys.trained], ['Neutral Rev every day (today\'s live rule)', R.series.rev], ['Long all coins every day', R.series.mkt], ['Long BTC every day', R.series.btc], ['Momentum L/S every day', R.series.momls], ['Breakout every day', R.series.brk]];
+    h += '<h2>C. Switching systems vs always-on (the $1,000 desk)</h2><div class="scroll"><table><tr><th>System</th><th>Total</th><th>Per year</th><th>Train per year</th><th>Test per year</th><th>Worst drawdown</th><th>Green months</th></tr>'; t += 'C) system | total perYear trainPerYear testPerYear worstDD green%\n';
+    sysL.forEach(function (s) { var a = stats(X, s[1]), tr = stats(X, s[1], null, TRAIN_END), te = stats(X, s[1], TRAIN_END + 1, null);
+      h += '<tr><td style="white-space:normal;min-width:240px">' + s[0] + '</td><td class="' + cls(a.total) + '"><b>' + usd(a.total) + '</b></td><td class="' + cls(a.perYear) + '">' + usd(a.perYear) + '</td><td class="' + cls(tr.perYear) + '">' + usd(tr.perYear) + '</td><td class="' + cls(te.perYear) + '"><b>' + usd(te.perYear) + '</b></td><td class="dn">' + usd(a.dd) + '</td><td>' + a.green.toFixed(0) + '%</td></tr>';
+      t += s[0] + ' | ' + usd(a.total) + ' ' + usd(a.perYear) + ' ' + usd(tr.perYear) + ' ' + usd(te.perYear) + ' ' + usd(a.dd) + ' ' + a.green.toFixed(0) + '%\n'; });
+    h += '</table></div><div class="sub">The number that matters most is <b>Test per year</b>: money made in years the rules never saw. A drawdown worse than -$1,000 means the desk would have been wiped out at 5x.</div>';
+    h += '<h2>D. Running total ($1,000 desk)</h2><canvas id="eq"></canvas><div class="lg" id="lg"></div>';
+    // E: by year
+    var ys = Object.keys(stats(X, R.series.cash).years);
+    h += '<h2>E. Year by year</h2><div class="scroll"><table><tr><th>System</th>' + ys.map(function (y) { return '<th>' + y + '</th>'; }).join('') + '</tr>'; t += 'E) by year ' + ys.join(' ') + '\n';
+    sysL.forEach(function (s) { var a = stats(X, s[1]); h += '<tr><td>' + s[0].split(' (')[0] + '</td>' + ys.map(function (y) { var v = a.years[y] || 0; return '<td class="' + cls(v) + '">' + usd(v) + '</td>'; }).join('') + '</tr>'; t += s[0].split(' (')[0] + ' | ' + ys.map(function (y) { return usd(a.years[y] || 0); }).join(' ') + '\n'; });
+    h += '</table></div>';
+    $('out').innerHTML = h; text = t; $('cp').style.display = ''; chart(R);
+  }
+  function go(data) {
+    $('st').textContent = 'Calculating...';
+    setTimeout(function () { try { var fee = +$('fee').value / 100, R = analyse(data, fee); summarise(R, fee); $('st').textContent = 'Done. ' + R.X.names.length + ' coins. Change the fee and it recalculates.'; } catch (e) { $('st').textContent = 'Could not analyse: ' + e.message; } $('go').disabled = false; $('pb').style.width = '100%'; }, 30);
+  }
+  $('fee').onchange = function () { if (CACHE) go(CACHE); };
+  $('go').onclick = function () {
+    $('go').disabled = true; var data = {}, i = 0;
+    try { var c = JSON.parse(localStorage.getItem('ap-study-v2') || 'null'); if (c && Date.now() - c.t < 12 * 3600000) { CACHE = c.d; go(c.d); return; } } catch (e) {}
+    function next() {
+      if (i >= COINS.length) { try { localStorage.setItem('ap-study-v2', JSON.stringify({ t: Date.now(), d: data })); } catch (e) {} CACHE = data; go(data); return; }
+      var c = COINS[i]; $('st').textContent = 'Downloading ' + c + ' (' + (i + 1) + ' of ' + COINS.length + ')...'; $('pb').style.width = (i / COINS.length * 100) + '%';
+      fetchCoin(c).then(function (d) { if (Object.keys(d).length > 250) data[c] = d; i++; next(); });
+    }
+    next();
+  };
+  $('cp').onclick = function () { var b = $('cp'); (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () { b.textContent = 'Copied'; }).catch(function () { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); b.textContent = 'Copied'; } catch (e) { b.textContent = 'Copy failed'; } ta.remove(); }); setTimeout(function () { b.textContent = 'Copy results'; }, 2000); };
+})();
+</script>
+</body>
+</html>

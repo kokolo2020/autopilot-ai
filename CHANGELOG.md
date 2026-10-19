@@ -60,6 +60,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.49
+- New: Round 3 adaptive study. Daily market regime (Bull/Bear/Chop/Panic from BTC trend and breadth), 10 strategies tested in every regime, a pre-set playbook and a switcher trained on 2022-23 and tested on 2024-26, with equity curve, drawdowns and year by year
+
 ## v1.48
 - Real funding on every perpetual desk: OKX settlements paid or received while a leg is open are booked into its P&L at close (before: only Rev 3 and My picks). Funding history is prefetched in parallel at the 7am close. Daily report shows booked fees and funding per desk
 
