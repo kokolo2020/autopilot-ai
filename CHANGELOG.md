@@ -58,6 +58,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.47
+- New: 8h study page. Does closing every 8 hours (7am, 3pm, 11pm Bangkok) beat the 24h batch? 4-hour OKX history, per-day net after costs, per session, after falling markets, month by month
+
 ## v1.46
 - My picks: Today column (% since the 7am close) and a tap-to-open candle chart per coin (Today / 1W / 1M / Since entry) with volume, entry and add-on lines and markers, next add-on level and liquidation line; new candles function (OKX perp, OKX spot, Gate.io fallback)
 

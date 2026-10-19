@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot 8h Study</title>
+<style>
+  :root { --bg:#0b0f14; --card:#121922; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --acc:#6aa9ff; --up:#3ddc97; --dn:#ff6b6b; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f4f6f9; --card:#fff; --line:#dde3ea; --text:#17202b; --mut:#5b6b7d; --acc:#2c6fd6; --up:#1a8f5f; --dn:#c0392b; } }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:980px; margin:0 auto; padding:16px; } h1 { font-size:20px; margin:0 0 4px; } h2 { font-size:15px; margin:24px 0 6px; } .sub, .mut { color:var(--mut); font-size:12px; } a { color:var(--acc); }
+  .scroll { overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--card); } table { border-collapse:collapse; width:100%; font-size:13px; white-space:nowrap; }
+  th, td { padding:7px 10px; text-align:right; border-bottom:1px solid var(--line); } th:first-child, td:first-child { text-align:left; } th { color:var(--mut); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; } tr:last-child td { border-bottom:0; }
+  .up { color:var(--up); } .dn { color:var(--dn); } .best { background:rgba(61,220,151,.14); font-weight:700; }
+  button { font:600 13px system-ui; border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:999px; padding:6px 14px; cursor:pointer; margin-right:6px; }
+  .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin:8px 0; } .bar i { display:block; height:100%; width:0; background:var(--acc); transition:width .2s; }
+  pre { white-space:pre-wrap; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>8-hour holds vs 24-hour holds</h1>
+  <div class="sub">Would Neutral Rev do better closing every 8 hours (7am, 3pm, 11pm Bangkok) instead of once a day? Same rule as the live desk: long the 5 weakest, short the 5 strongest, then measured on 4-hour OKX candles. Nothing here trades.</div>
+  <div style="margin:12px 0"><label class="mut">History: <select id="rg"><option value="11">6 months</option><option value="22" selected>1 year</option><option value="44">2 years</option></select></label> <button id="go" type="button">Run the study</button><button id="cp" type="button" style="display:none">Copy results</button></div>
+  <div class="bar"><i id="pb"></i></div><div class="sub" id="st">Press the button. 1 year of 4-hour candles for about 40 coins takes about 3 to 5 minutes to download (cached on this device for 12 hours), then it is calculated in your browser.</div>
+  <div id="out"></div>
+  <p class="mut">How to read it: all numbers are % per leg (one $500 position). "Per day" adds up everything one desk does in a day: one 24h trade, or three 8h trades, each paying the round-trip cost. On a $1,000 desk with ten $500 legs, 0.10% per leg per day = $5 a day. Costs: 0.11% per round trip (taker both ways) and 0.04% (maker both ways). Caveats: today's surviving coins only; spot prices, so no funding; 8h windows start at 00:00, 08:00 and 16:00 UTC (07:00, 15:00, 23:00 Bangkok). <a href="/study.html">Daily history study</a> · <a href="/research">Back to research</a></p>
+</div>
+<script>
+(function () {
+  var COINS = ['BTC', 'ETH', 'XRP', 'SOL', 'BNB', 'DOGE', 'ADA', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH', 'UNI', 'ATOM', 'NEAR', 'OP', 'ARB', 'INJ', 'FIL', 'AAVE', 'ETC', 'XLM', 'TRX', 'HBAR', 'RUNE', 'ALGO', 'APT', 'SUI', 'TIA', 'WLD', 'JUP', 'EGLD', 'CRV', 'SAND', 'MANA', 'APE', 'AXS', 'GRT', 'LDO'];
+  var H4 = 4 * 3600000, K = 5, C1 = 0.11, C2 = 0.04, USD = 50; // USD = dollars per 1% per leg per day on ten $500 legs
+  var $ = function (i) { return document.getElementById(i); }, f2 = function (n) { return n == null || !isFinite(n) ? '–' : (n < 0 ? '' : '+') + n.toFixed(2); }, fd = function (n) { return (n < 0 ? '-$' : '+$') + Math.abs(n).toFixed(2); }, cls = function (n) { return n < 0 ? 'dn' : n > 0 ? 'up' : ''; };
+  var mean = function (a) { return a.length ? a.reduce(function (s, x) { return s + x; }, 0) / a.length : NaN; }, sd = function (a) { var m = mean(a); return Math.sqrt(mean(a.map(function (x) { return (x - m) * (x - m); }))); };
+  var text = '';
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function fetchCoin(c, pages) {
+    var out = {}, after = '', n = 0;
+    function page() {
+      return fetch('/.netlify/functions/okx-hist?bar=4H&inst=' + c + '-USDT' + (after ? '&after=' + after : '')).then(function (r) { return r.json(); }).then(function (j) {
+        var d = j.data || []; d.forEach(function (k) { out[Math.round(+k[0] / H4) + 1] = +k[4]; }); // key = index of the candle CLOSE time in 4h units
+        if (d.length < 100 || ++n >= pages) return out; after = d[d.length - 1][0]; return sleep(150).then(page);
+      }).catch(function () { return out; });
+    }
+    return page();
+  }
+  /* one trade: rank coins by past return over `lb` 4h-steps at index t, hold `h` steps */
+  function trade(data, names, t, lb, h) {
+    var el = [];
+    names.forEach(function (c) { var d = data[c], a = d[t - lb], b = d[t], z = d[t + h], p24 = d[t - 6]; if (a && b && z && p24) el.push({ r: b / a - 1, f: (z / b - 1) * 100, m24: (b / p24 - 1) * 100 }); });
+    if (el.length < 20) return null;
+    el.sort(function (x, y) { return x.r - y.r; });
+    var f = el.map(function (x) { return x.f; }), mk = mean(f), w = mean(f.slice(0, K)), s = mean(f.slice(-K));
+    return { t: t, g: (w - s) / 2, wm: w - mk, sm: s - mk, mk24: mean(el.map(function (x) { return x.m24; })), win: w > s };
+  }
+  function analyse(data) {
+    var names = Object.keys(data), all = {}; names.forEach(function (c) { Object.keys(data[c]).forEach(function (k) { all[k] = 1; }); });
+    var idx = Object.keys(all).map(Number).sort(function (a, b) { return a - b; }), lo = idx[0] + 6, hi = idx[idx.length - 1] - 6, S = { d24: [], h8r24: [], h8r8: [] };
+    for (var t = lo; t <= hi; t++) {
+      if (t % 6 === 0) { var x = trade(data, names, t, 6, 6); if (x) S.d24.push(x); }
+      if (t % 2 === 0) { var y = trade(data, names, t, 6, 2), z = trade(data, names, t, 2, 2); if (y) S.h8r24.push(y); if (z) S.h8r8.push(z); }
+    }
+    return { S: S, names: names, t0: lo * H4, t1: hi * H4 };
+  }
+  var dayOf = function (t) { return Math.floor(t / 6); }, sess = function (t) { return (t % 6) / 2; }, SN = ['07:00-15:00 Bangkok (Asia)', '15:00-23:00 Bangkok (Europe)', '23:00-07:00 Bangkok (US)'];
+  function perDay(list, cost) { var d = {}; list.forEach(function (x) { var k = dayOf(x.t); d[k] = d[k] || { s: 0, n: 0 }; d[k].s += x.g - cost; d[k].n++; }); return Object.keys(d).map(function (k) { return { day: +k, v: d[k].s, n: d[k].n }; }); }
+  function summarise(an) {
+    var S = an.S, h = '', t = '', rows = [['24h hold (live rule), rank by 24h move', S.d24, 1], ['8h hold x3 a day, rank by 24h move', S.h8r24, 3], ['8h hold x3 a day, rank by last 8h move', S.h8r8, 3]];
+    t += '8H STUDY ' + new Date(an.t0).toISOString().slice(0, 10) + ' to ' + new Date(an.t1).toISOString().slice(0, 10) + ', ' + an.names.length + ' coins. % per leg.\n';
+    h += '<h2>A. Which hold earns more per day?</h2><div class="scroll"><table><tr><th>Rule</th><th>Trades</th><th>Gross per trade</th><th>Weakest vs market</th><th>Strongest vs market</th><th>Trades won</th><th>Per day net @0.11%</th><th>Per day net @0.04%</th><th>$ per day @0.11%</th><th>$ per day @0.04%</th><th>Green days @0.11%</th><th>Worst day</th></tr>';
+    t += 'A) rule trades gross/trade weak-mkt strong-mkt won% day@0.11 day@0.04 $day@0.11 $day@0.04 green% worstday\n';
+    rows.forEach(function (r) {
+      var L = r[1]; if (!L.length) return; var g = mean(L.map(function (x) { return x.g; })), d1 = perDay(L, C1), d2 = perDay(L, C2), m1 = mean(d1.map(function (x) { return x.v; })), m2 = mean(d2.map(function (x) { return x.v; })), gr = d1.filter(function (x) { return x.v > 0; }).length / d1.length * 100, wd = Math.min.apply(null, d1.map(function (x) { return x.v; })), won = L.filter(function (x) { return x.win; }).length / L.length * 100;
+      var wm = mean(L.map(function (x) { return x.wm; })), sm = mean(L.map(function (x) { return x.sm; }));
+      h += '<tr><td>' + r[0] + '</td><td>' + L.length + '</td><td class="' + cls(g) + '">' + f2(g) + '</td><td class="' + cls(wm) + '">' + f2(wm) + '</td><td class="' + cls(-sm) + '">' + f2(sm) + '</td><td>' + won.toFixed(0) + '%</td><td class="' + cls(m1) + '"><b>' + f2(m1) + '</b></td><td class="' + cls(m2) + '">' + f2(m2) + '</td><td class="' + cls(m1) + '">' + fd(m1 * USD) + '</td><td class="' + cls(m2) + '">' + fd(m2 * USD) + '</td><td>' + gr.toFixed(0) + '%</td><td class="dn">' + f2(wd) + '</td></tr>';
+      t += r[0] + ' | ' + L.length + ' ' + f2(g) + ' ' + f2(wm) + ' ' + f2(sm) + ' ' + won.toFixed(0) + '% ' + f2(m1) + ' ' + f2(m2) + ' ' + fd(m1 * USD) + ' ' + fd(m2 * USD) + ' ' + gr.toFixed(0) + '% ' + f2(wd) + '\n';
+    });
+    h += '</table></div><div class="sub">Gross per trade must beat the cost per trade to make money. 8h trades pay the cost three times a day.</div>';
+    h += '<h2>B. Which 8-hour session does the rule work in? (rank by 24h move)</h2><div class="scroll"><table><tr><th>Session</th><th>Trades</th><th>Gross</th><th>Weakest vs market</th><th>Strongest vs market</th><th>Won</th><th>Net @0.11%</th><th>Net @0.04%</th><th>Rank by 8h move: gross</th></tr>'; t += 'B) session: n gross weak-mkt strong-mkt won net0.11 net0.04 | rank8 gross\n';
+    [0, 1, 2].forEach(function (k) {
+      var L = S.h8r24.filter(function (x) { return sess(x.t) === k; }), L8 = S.h8r8.filter(function (x) { return sess(x.t) === k; }); if (!L.length) return;
+      var g = mean(L.map(function (x) { return x.g; })), wm = mean(L.map(function (x) { return x.wm; })), sm = mean(L.map(function (x) { return x.sm; })), won = L.filter(function (x) { return x.win; }).length / L.length * 100, g8 = mean(L8.map(function (x) { return x.g; }));
+      h += '<tr><td>' + SN[k] + '</td><td>' + L.length + '</td><td class="' + cls(g) + '">' + f2(g) + '</td><td class="' + cls(wm) + '">' + f2(wm) + '</td><td class="' + cls(-sm) + '">' + f2(sm) + '</td><td>' + won.toFixed(0) + '%</td><td class="' + cls(g - C1) + '">' + f2(g - C1) + '</td><td class="' + cls(g - C2) + '">' + f2(g - C2) + '</td><td class="' + cls(g8) + '">' + f2(g8) + '</td></tr>';
+      t += SN[k] + ' | ' + L.length + ' ' + f2(g) + ' ' + f2(wm) + ' ' + f2(sm) + ' ' + won.toFixed(0) + '% ' + f2(g - C1) + ' ' + f2(g - C2) + ' | ' + f2(g8) + '\n';
+    });
+    h += '</table></div><div class="sub">If one session is clearly better, a desk could trade only that 8-hour window once a day (one cost instead of three).</div>';
+    h += '<h2>C. After a falling market (average coin down 1%+ or 2%+ over the previous 24h)</h2><div class="scroll"><table><tr><th>Condition</th><th>Rule</th><th>Trades</th><th>Gross per trade</th><th>Weakest vs market</th><th>Net @0.11%</th><th>Net @0.04%</th></tr>'; t += 'C) condition rule n gross weak-mkt net0.11 net0.04\n';
+    [['market 24h -1% or worse', function (x) { return x.mk24 <= -1; }], ['market 24h -2% or worse', function (x) { return x.mk24 <= -2; }], ['all other times', function (x) { return x.mk24 > -1; }]].forEach(function (c) {
+      [['24h hold', S.d24], ['8h hold', S.h8r24]].forEach(function (r) { var L = r[1].filter(c[1]); if (L.length < 5) return; var g = mean(L.map(function (x) { return x.g; })), wm = mean(L.map(function (x) { return x.wm; }));
+        h += '<tr><td>' + c[0] + '</td><td>' + r[0] + '</td><td>' + L.length + '</td><td class="' + cls(g) + '">' + f2(g) + '</td><td class="' + cls(wm) + '">' + f2(wm) + '</td><td class="' + cls(g - C1) + '">' + f2(g - C1) + '</td><td class="' + cls(g - C2) + '">' + f2(g - C2) + '</td></tr>'; t += c[0] + ' | ' + r[0] + ' ' + L.length + ' ' + f2(g) + ' ' + f2(wm) + ' ' + f2(g - C1) + ' ' + f2(g - C2) + '\n'; });
+    });
+    h += '</table></div>';
+    var mo = {}; [['a', S.d24], ['b', S.h8r24], ['c', S.h8r8]].forEach(function (r) { perDay(r[1], C1).forEach(function (d) { var m = new Date(d.day * 6 * H4).toISOString().slice(0, 7), o = mo[m] = mo[m] || { a: [], b: [], c: [], b2: [] }; o[r[0]].push(d.v); }); }); perDay(S.h8r24, C2).forEach(function (d) { var m = new Date(d.day * 6 * H4).toISOString().slice(0, 7); if (mo[m]) mo[m].b2.push(d.v); });
+    h += '<h2>D. Month by month: net per leg per day @0.11% (is it consistent?)</h2><div class="scroll"><table><tr><th>Month</th><th>Days</th><th>24h hold</th><th>8h, rank 24h</th><th>8h, rank 8h</th><th>8h rank 24h @0.04%</th><th>Winner</th></tr>'; t += 'D) month days 24h 8h-r24 8h-r8 8h-r24@0.04 winner\n';
+    var wins = { '24h': 0, '8h': 0 };
+    Object.keys(mo).sort().forEach(function (m) { var o = mo[m], a = mean(o.a), b = mean(o.b), c = mean(o.c), b2 = mean(o.b2), wn = !isFinite(a) || !isFinite(b) ? '–' : a >= b ? '24h' : '8h'; if (wins[wn] != null) wins[wn]++;
+      h += '<tr><td>' + m + '</td><td>' + o.a.length + '</td><td class="' + cls(a) + '">' + f2(a) + '</td><td class="' + cls(b) + '">' + f2(b) + '</td><td class="' + cls(c) + '">' + f2(c) + '</td><td class="' + cls(b2) + '">' + f2(b2) + '</td><td>' + wn + '</td></tr>'; t += m + ' ' + o.a.length + ' ' + f2(a) + ' ' + f2(b) + ' ' + f2(c) + ' ' + f2(b2) + ' ' + wn + '\n'; });
+    h += '</table></div><div class="sub">Months won: 24h ' + wins['24h'] + ', 8h ' + wins['8h'] + '. A real edge should win most months, not one big month.</div>'; t += 'months won: 24h ' + wins['24h'] + ' 8h ' + wins['8h'] + '\n';
+    $('out').innerHTML = h; text = t; $('cp').style.display = '';
+  }
+  function done(data) { $('st').textContent = 'Calculating...'; setTimeout(function () { try { var an = analyse(data); summarise(an); $('st').textContent = 'Done. ' + an.names.length + ' coins, ' + an.S.d24.length + ' days, ' + an.S.h8r24.length + ' 8-hour windows (' + new Date(an.t0).toISOString().slice(0, 10) + ' to ' + new Date(an.t1).toISOString().slice(0, 10) + ').'; } catch (e) { $('st').textContent = 'Could not analyse: ' + e.message; } $('go').disabled = false; $('pb').style.width = '100%'; }, 30); }
+  $('go').onclick = function () {
+    var pages = +$('rg').value, key = 'ap-study8h-' + pages; $('go').disabled = true; var data = {}, i = 0;
+    try { var c = JSON.parse(localStorage.getItem(key) || 'null'); if (c && Date.now() - c.t < 12 * 3600000) { done(c.d); return; } } catch (e) {}
+    function next() {
+      if (i >= COINS.length) { try { localStorage.setItem(key, JSON.stringify({ t: Date.now(), d: data })); } catch (e) {} done(data); return; }
+      var c = COINS[i]; $('st').textContent = 'Downloading ' + c + ' (' + (i + 1) + ' of ' + COINS.length + ')...'; $('pb').style.width = (i / COINS.length * 100) + '%';
+      fetchCoin(c, pages).then(function (d) { if (Object.keys(d).length > 200) data[c] = d; i++; next(); });
+    }
+    next();
+  };
+  $('cp').onclick = function () { var b = $('cp'); (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () { b.textContent = 'Copied'; }).catch(function () { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); b.textContent = 'Copied'; } catch (e) { b.textContent = 'Copy failed'; } ta.remove(); }); setTimeout(function () { b.textContent = 'Copy results'; }, 2000); };
+})();
+</script>
+</body>
+</html>
