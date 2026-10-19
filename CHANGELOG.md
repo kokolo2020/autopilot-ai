@@ -61,6 +61,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.50
+- New: Live page (live.html) and KuCoin order service for My picks: your own Tokyo server (live/server.mjs, one-command live/install.sh), dry run by default, up to 10 coins at $25 x 3 isolated, -20% safety pause, close one or all from the page
+
 ## v1.49
 - New: Round 3 adaptive study. Daily market regime (Bull/Bear/Chop/Panic from BTC trend and breadth), 10 strategies tested in every regime, a pre-set playbook and a switcher trained on 2022-23 and tested on 2024-26, with equity curve, drawdowns and year by year
 
