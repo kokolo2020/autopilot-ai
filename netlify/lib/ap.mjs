@@ -800,7 +800,7 @@ export async function revxTick(db, rows, openPos, ctl) {
    A long at 3x is liquidated near -33%, so a leg is closed at -32% as "liquidated". Funding is booked into pnl when a leg closes. Coins with no OKX USDT perpetual are skipped and listed on picks.html. */
 export const MYPICKS = { coins: ['ZEN', 'NEAR', 'OP', 'ARB', 'RUNE', 'JTO', 'MON', 'EGLD', 'HYPE', 'SOL', 'SUI', 'GRAM', 'WLD', 'VVV', 'JUP', 'RAY', 'AERO', 'XRP', 'AVAX', 'CARDS'], margin: 250, lev: 3, liqAt: -0.32, addAt: -0.18, addMargin: 100, maxAdds: 4 };
 /* Price for a My-picks coin that has no OKX USDT perpetual: OKX spot first, then Gate.io and MEXC USDT perpetuals (public tickers). Returns { last, ask, src } or null. */
-export async function pickQuote(c, okxSpot) {
+export async function pickQuote(c, okxSpot, withSod = false) {
   const sp = okxSpot && okxSpot[c + '-USDT']; if (sp && sp.last > 0) return Object.assign({ src: 'OKX spot' }, sp);
   const tries = [
     ['Gate perp', 'https://api.gateio.ws/api/v4/futures/usdt/tickers?contract=' + c + '_USDT', (j) => j && j[0] && { last: +j[0].last, ask: +j[0].lowest_ask || +j[0].last }],
@@ -808,7 +808,11 @@ export async function pickQuote(c, okxSpot) {
     ['Gate spot', 'https://api.gateio.ws/api/v4/spot/tickers?currency_pair=' + c + '_USDT', (j) => j && j[0] && { last: +j[0].last, ask: +j[0].lowest_ask || +j[0].last }],
   ];
   for (const [src, url, f] of tries) {
-    try { const r = await fetch(url, { headers: { 'User-Agent': 'agent-desk-autopilot' } }); if (!r.ok) continue; const q = f(await r.json()); if (q && q.last > 0) return Object.assign({ src }, q); } catch (e) { /* next source */ }
+    try {
+      const r = await fetch(url, { headers: { 'User-Agent': 'agent-desk-autopilot' } }); if (!r.ok) continue; const q = f(await r.json()); if (!(q && q.last > 0)) continue;
+      if (withSod && src === 'Gate perp') { try { const k = await (await fetch('https://api.gateio.ws/api/v4/futures/usdt/candlesticks?contract=' + c + '_USDT&interval=1d&limit=1')).json(); if (k && k[0]) q.sod = +k[0].o; } catch (e) { /* no day open */ } }
+      return Object.assign({ src }, q);
+    } catch (e) { /* next source */ }
   }
   return null;
 }

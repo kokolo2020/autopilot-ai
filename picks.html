@@ -13,6 +13,14 @@
   .scroll { overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--card); } table { border-collapse:collapse; width:100%; font-size:13px; white-space:nowrap; }
   th, td { padding:8px 10px; text-align:right; border-bottom:1px solid var(--line); } th:first-child, td:first-child { text-align:left; font-weight:700; } th { color:var(--mut); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; } tr:last-child td { border-bottom:0; }
   .up { color:var(--up); } .dn { color:var(--dn); } .bar { display:inline-block; height:6px; border-radius:3px; vertical-align:middle; }
+  tr.row { cursor:pointer; } tr.row:hover td { background:rgba(106,169,255,.06); } td.coin u { text-decoration:none; border-bottom:1px dashed var(--mut); }
+  .ov { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:50; padding:12px; } .ov.on { display:flex; }
+  .sheet { background:var(--card); border:1px solid var(--line); border-radius:16px; width:min(980px,100%); max-height:100%; overflow:auto; padding:14px; }
+  .sh-h { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; } .sh-h h2 { margin:0; font-size:20px; } .sh-h .px { font:700 18px ui-monospace,monospace; } .sh-h .x { margin-left:auto; background:none; border:1px solid var(--line); color:var(--text); border-radius:10px; padding:4px 12px; font-size:16px; cursor:pointer; }
+  .rg { display:flex; gap:6px; margin:10px 0 6px; flex-wrap:wrap; } .rg button { font:600 13px system-ui,sans-serif; padding:6px 12px; border-radius:999px; border:1px solid var(--line); background:transparent; color:var(--text); cursor:pointer; } .rg button.on { background:var(--acc); border-color:var(--acc); color:#fff; }
+  #ch { position:relative; height:380px; } #ohlc { position:absolute; left:8px; top:6px; z-index:3; font:12px ui-monospace,monospace; color:var(--mut); pointer-events:none; }
+  .lv { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:6px; margin-top:10px; } .lv div { border:1px solid var(--line); border-radius:10px; padding:6px 10px; font-size:12px; } .lv b { font:700 13px ui-monospace,monospace; } .sw { display:inline-block; width:14px; height:0; border-top:2px solid; vertical-align:middle; margin-right:6px; }
+  @media (max-width:600px) { .ov { padding:0; align-items:flex-end; } .sheet { border-radius:16px 16px 0 0; } #ch { height:320px; } }
 </style>
 </head>
 <body>
@@ -22,6 +30,13 @@
   <div class="cards" id="cards"></div>
   <div class="scroll"><table id="t"></table></div>
   <p class="mut" id="miss"></p>
+  <div class="ov" id="ov" role="dialog" aria-modal="true" aria-labelledby="sh-c"><div class="sheet">
+    <div class="sh-h"><h2 id="sh-c">–</h2><span class="px" id="sh-p"></span><span id="sh-d"></span><button class="x" id="sh-x" type="button" aria-label="Close chart">✕</button></div>
+    <div class="rg" id="rg"><button type="button" data-r="today" class="on">Today</button><button type="button" data-r="1w">1W</button><button type="button" data-r="1m">1M</button><button type="button" data-r="entry">Since entry</button></div>
+    <div id="ch"><div id="ohlc"></div></div>
+    <div class="lv" id="lv"></div>
+    <div class="mut" id="sh-s" style="margin-top:8px"></div>
+  </div></div>
   <p class="mut">20 coins you chose, $250 margin each at 3x on OKX perpetuals (RUNE and CARDS have no OKX perpetual, so they are priced from OKX spot or a Gate.io / MEXC perpetual; no funding is booked for them) ($750 per position, $5,000 in total), all long, opened once and held with no daily close. Each time a coin falls another 18% below its latest entry, $100 more margin at 3x is added (up to 4 add-ons per coin, each shown as its own line). A leg is closed as "liquidated" at -32%. P&amp;L is the price move on the $750 position, before fees and funding (both are booked when a leg closes). Paper money. <a href="/research">Back to research</a> · <a href="/regime.html">Market regimes</a></p>
 </div>
 <script>
@@ -34,21 +49,89 @@
   function get(t, q) { return fetch(URL_ + t + '?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(t + ' ' + r.status); return r.json(); }); }
   function paint() {
     var rows = pos.map(function (p) {
-      var c = p.coin.split(':')[0], e = +p.entry_price, n = +p.notional, closed = p.status === 'closed', last = closed ? +p.exit_price : px[c], chg = last ? (last / e - 1) * 100 : null, pnl = closed ? +p.pnl : last ? n * (last / e - 1) : 0;
-      return { c: c, e: e, n: n, last: last, chg: chg, pnl: pnl, closed: closed, why: p.close_reason };
+      var c = p.coin.split(':')[0], e = +p.entry_price, n = +p.notional, closed = p.status === 'closed', q = px[c] || {}, last = closed ? +p.exit_price : q.last, today = q.last && q.sod ? (q.last / q.sod - 1) * 100 : null, chg = last ? (last / e - 1) * 100 : null, pnl = closed ? +p.pnl : last ? n * (last / e - 1) : 0;
+      return { c: c, e: e, n: n, last: last, today: today, chg: chg, pnl: pnl, closed: closed, why: p.close_reason };
     }).sort(function (a, b) { return b.pnl - a.pnl; });
     var sum = rows.reduce(function (s, r) { return s + r.pnl; }, 0), margin = rows.reduce(function (s, r) { return s + r.n / 3; }, 0), best = rows[0], worst = rows[rows.length - 1], win = rows.filter(function (r) { return r.pnl > 0; }).length;
     $('cards').innerHTML = [['Open P&L', '<span class="' + cls(sum) + '">' + money(sum) + '</span>'], ['Margin value', '$' + (margin + sum).toFixed(2)], ['Return on margin', '<span class="' + cls(sum) + '">' + pct(margin ? sum / margin * 100 : 0) + '</span>'], ['In profit', win + ' / ' + rows.length], ['Best', best ? best.c + ' ' + money(best.pnl) : '–'], ['Worst', worst ? worst.c + ' ' + money(worst.pnl) : '–']].map(function (x) { return '<div class="card"><small>' + x[0] + '</small><b>' + x[1] + '</b></div>'; }).join('');
     var mx = Math.max.apply(null, rows.map(function (r) { return Math.abs(r.pnl); }).concat([1]));
-    $('t').innerHTML = '<tr><th>Coin</th><th>Entry</th><th>Last</th><th>Move</th><th>P&amp;L</th><th></th><th>Return on $250</th></tr>' + (rows.length ? rows.map(function (r) {
-      return '<tr><td>' + r.c + (r.closed ? ' <span class="mut">(' + (r.why || 'closed') + ')</span>' : r.why === 'pick-add' ? ' <span class="mut">(add-on, \$100)</span>' : '') + '</td><td>' + r.e + '</td><td>' + (r.last ? +r.last.toPrecision(6) : '–') + '</td><td class="' + cls(r.chg || 0) + '">' + (r.chg == null ? '–' : pct(r.chg)) + '</td><td class="' + cls(r.pnl) + '">' + money(r.pnl) + '</td><td style="text-align:left"><span class="bar" style="width:' + Math.round(Math.abs(r.pnl) / mx * 70) + 'px;background:var(--' + (r.pnl < 0 ? 'dn' : 'up') + ')"></span></td><td class="' + cls(r.pnl) + '">' + pct(r.pnl / (r.n / 3) * 100) + '</td></tr>';
-    }).join('') : '<tr><td colspan="7" class="mut">No positions yet. They open on the next 5-minute tick after the desk goes live.</td></tr>');
+    $('t').innerHTML = '<tr><th>Coin</th><th>Entry</th><th>Last</th><th>Today</th><th>Move</th><th>P&amp;L</th><th></th><th>Return on $250</th></tr>' + (rows.length ? rows.map(function (r) {
+      return '<tr class="row" data-c="' + r.c + '" title="Show ' + r.c + ' chart"><td class="coin"><u>' + r.c + '</u>' + (r.closed ? ' <span class="mut">(' + (r.why || 'closed') + ')</span>' : r.why === 'pick-add' ? ' <span class="mut">(add-on, \$100)</span>' : '') + '</td><td>' + r.e + '</td><td>' + (r.last ? +r.last.toPrecision(6) : '–') + '</td><td class="' + cls(r.today || 0) + '">' + (r.today == null ? '–' : pct(r.today)) + '</td><td class="' + cls(r.chg || 0) + '">' + (r.chg == null ? '–' : pct(r.chg)) + '</td><td class="' + cls(r.pnl) + '">' + money(r.pnl) + '</td><td style="text-align:left"><span class="bar" style="width:' + Math.round(Math.abs(r.pnl) / mx * 70) + 'px;background:var(--' + (r.pnl < 0 ? 'dn' : 'up') + ')"></span></td><td class="' + cls(r.pnl) + '">' + pct(r.pnl / (r.n / 3) * 100) + '</td></tr>';
+    }).join('') : '<tr><td colspan="8" class="mut">No positions yet. They open on the next 5-minute tick after the desk goes live.</td></tr>');
     var have = {}; pos.forEach(function (p) { have[p.coin.split(':')[0]] = 1; });
     var miss = WANT.filter(function (c) { return !have[c]; });
     $('miss').textContent = miss.length ? 'Not open yet: ' + miss.join(', ') + '. These are waiting for the next tick (within 5 minutes) or have no price on OKX, Gate.io or MEXC; the desk retries every tick.' : '';
-    $('st').textContent = 'Updated ' + new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Bangkok' }) + ' Bangkok · live prices from OKX, refreshes every 30 s';
+    $('st').textContent = 'Updated ' + new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Bangkok' }) + ' Bangkok · live prices, refreshes every 30 s · Today = change since the 7am Bangkok close · tap a coin for its chart';
   }
-  function load() { return Promise.all([get('ap_positions', 'select=coin,status,entry_price,exit_price,notional,pnl,close_reason&coin=like.*:pick&order=id.asc&limit=100'), fetch('/.netlify/functions/prices').then(function (r) { return r.json(); }).catch(function () { return {}; })]).then(function (r) { pos = r[0]; px = r[1]; paint(); }).catch(function (e) { $('st').textContent = 'Could not load: ' + e.message; }); }
+  function load() { return Promise.all([get('ap_positions', 'select=coin,status,entry_price,exit_price,notional,pnl,close_reason,opened_at&coin=like.*:pick&order=id.asc&limit=100'), fetch('/.netlify/functions/prices?full=1').then(function (r) { return r.json(); }).catch(function () { return {}; })]).then(function (r) { pos = r[0]; px = r[1]; paint(); }).catch(function (e) { $('st').textContent = 'Could not load: ' + e.message; }); }
+
+  /* ---------- coin chart (TradingView lightweight-charts, loaded on first open) ---------- */
+  var LW = 'https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js', lwP = null, chart = null, cs = null, vs = null, cur = null, rng = 'today', timer = null, BKK = 7 * 3600;
+  var BARMS = { '5m': 3e5, '15m': 9e5, '1H': 36e5, '4H': 144e5, '1D': 864e5 };
+  function lw() { return lwP || (lwP = new Promise(function (ok, no) { var sc = document.createElement('script'); sc.src = LW; sc.onload = ok; sc.onerror = function () { lwP = null; no(new Error('chart library did not load')); }; document.head.appendChild(sc); })); }
+  function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+  function dec(p) { return p >= 1000 ? 2 : p >= 10 ? 3 : p >= 1 ? 4 : p >= 0.01 ? 5 : 7; }
+  function legs(c) { return pos.filter(function (p) { return p.coin.split(':')[0] === c; }).sort(function (a, b) { return new Date(a.opened_at) - new Date(b.opened_at); }); }
+  function plan(r) {
+    var now = Date.now();
+    if (r === 'today') { var d0 = new Date(); d0.setUTCHours(0, 0, 0, 0); var n = Math.ceil((now - d0.getTime()) / 3e5) + 1; return n < 36 ? { bar: '5m', limit: 36 + n } : { bar: '5m', limit: n }; }
+    if (r === '1w') return { bar: '1H', limit: 168 };
+    if (r === '1m') return { bar: '4H', limit: 180 };
+    var ls = legs(cur), t0 = ls.length ? new Date(ls[0].opened_at).getTime() : now - 864e5, age = Math.max(36e5, now - t0) * 1.08;
+    var bar = ['5m', '15m', '1H', '4H', '1D'].filter(function (b) { return age / BARMS[b] <= 290; })[0] || '1D';
+    return { bar: bar, limit: Math.min(300, Math.max(36, Math.ceil(age / BARMS[bar]) + 2)) };
+  }
+  function build() {
+    var el = $('ch'); if (chart) { chart.remove(); chart = null; }
+    chart = LightweightCharts.createChart(el, { autoSize: true, layout: { background: { type: 'solid', color: css('--card') }, textColor: css('--mut'), fontSize: 11 }, grid: { vertLines: { color: css('--line') }, horzLines: { color: css('--line') } }, rightPriceScale: { borderColor: css('--line') }, timeScale: { borderColor: css('--line'), timeVisible: true, secondsVisible: false }, crosshair: { mode: 0 }, localization: { locale: 'en-GB' } });
+    cs = chart.addCandlestickSeries({ upColor: css('--up'), downColor: css('--dn'), wickUpColor: css('--up'), wickDownColor: css('--dn'), borderVisible: false });
+    vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false });
+    chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } }); cs.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0.24 } });
+    chart.subscribeCrosshairMove(function (p) { var d = p && p.seriesData && p.seriesData.get(cs); if (!d) { $('ohlc').textContent = ''; return; } var f = function (x) { return (+x).toFixed(dec(d.close)); }; $('ohlc').innerHTML = 'O ' + f(d.open) + ' H ' + f(d.high) + ' L ' + f(d.low) + ' C <b style="color:var(--' + (d.close >= d.open ? 'up' : 'dn') + ')">' + f(d.close) + '</b>'; });
+  }
+  function draw(j, keepView) {
+    var k = j.data || []; if (!k.length) { $('sh-s').textContent = 'No candles for ' + cur + ' from OKX or Gate.io.'; cs.setData([]); vs.setData([]); return; }
+    var last = k[k.length - 1][4], d = dec(last), up = css('--up'), dn = css('--dn');
+    cs.applyOptions({ priceFormat: { type: 'price', precision: d, minMove: Math.pow(10, -d) } });
+    cs.setData(k.map(function (x) { return { time: x[0] / 1000 + BKK, open: x[1], high: x[2], low: x[3], close: x[4] }; }));
+    vs.setData(k.map(function (x) { return { time: x[0] / 1000 + BKK, value: x[5], color: (x[4] >= x[1] ? up : dn) + '55' }; }));
+    (cs._lines || []).forEach(function (l) { cs.removePriceLine(l); }); cs._lines = [];
+    var ls = legs(cur), open = ls.filter(function (p) { return p.status === 'open'; }), acc = css('--acc'), gold = '#f5c451', lv = [], marks = [];
+    var line = function (price, color, style, title, width) { cs._lines.push(cs.createPriceLine({ price: price, color: color, lineWidth: width || 2, lineStyle: style, axisLabelVisible: true, title: title })); };
+    var away = function (p) { return (p / last - 1) * 100; };
+    ls.forEach(function (p, i) {
+      var e = +p.entry_price, lab = i === 0 ? 'Entry $250' : 'Add-on #' + i + ' $100';
+      line(e, acc, i === 0 ? 0 : 2, lab); lv.push(['<span class="sw" style="border-color:' + acc + (i ? ';border-top-style:dashed' : '') + '"></span>' + lab, e, p.status === 'closed' ? 'closed (' + (p.close_reason || '') + ')' : pct(away(e)) + ' from now']);
+      var t = new Date(p.opened_at).getTime() / 1000 + BKK, bt = null; for (var q = 0; q < k.length; q++) { var kt = k[q][0] / 1000 + BKK; if (kt <= t) bt = kt; else break; }
+      if (bt != null && t >= k[0][0] / 1000 + BKK) marks.push({ time: bt, position: 'belowBar', color: acc, shape: 'arrowUp', text: i === 0 ? 'Entry' : 'Add #' + i });
+    });
+    cs.setMarkers(marks.sort(function (a, b) { return a.time - b.time; }));
+    if (open.length) {
+      var lastE = +ls[ls.length - 1].entry_price, adds = ls.length - 1;
+      if (adds < 4) { var na = lastE * 0.82; line(na, gold, 1, 'Next add-on -18%'); lv.push(['<span class="sw" style="border-color:' + gold + ';border-top-style:dotted"></span>Next add-on (-18% from ' + lastE.toFixed(d) + ')', na, pct(away(na)) + ' from now']); }
+      else lv.push(['All 4 add-ons used', null, 'no more ladder buys']);
+      var liq = +open[0].entry_price * 0.68; line(liq, dn, 0, 'Liquidation -32%', 2); lv.push(['<span class="sw" style="border-color:' + dn + '"></span>Liquidation (-32% from first open entry)', liq, pct(away(liq)) + ' from now']);
+    }
+    $('lv').innerHTML = lv.map(function (x) { return '<div>' + x[0] + '<br><b>' + (x[1] == null ? '' : x[1].toFixed(d)) + '</b> <span class="mut">' + x[2] + '</span></div>'; }).join('');
+    var q0 = px[cur] || {}, tp = q0.last && q0.sod ? (q0.last / q0.sod - 1) * 100 : null;
+    $('sh-p').textContent = (q0.last || last).toFixed(d); $('sh-d').innerHTML = tp == null ? '' : '<span class="' + cls(tp) + '">' + pct(tp) + ' today</span>';
+    $('sh-s').textContent = 'Candles from ' + (j.src || '–') + ', times in Bangkok, refreshes every minute while open. Lines outside the visible price range are listed above but not drawn.';
+    if (!keepView) chart.timeScale().fitContent();
+  }
+  function fetchDraw(keepView) {
+    var p = plan(rng); $('sh-s').textContent = keepView ? $('sh-s').textContent : 'Loading ' + cur + ' candles...';
+    return fetch('/.netlify/functions/candles?coin=' + cur + '&bar=' + p.bar + '&limit=' + p.limit).then(function (r) { return r.json(); }).then(function (j) { draw(j, keepView); }).catch(function (e) { $('sh-s').textContent = 'Could not load candles: ' + e.message; });
+  }
+  function openChart(c) {
+    cur = c; rng = 'today'; [].forEach.call($('rg').children, function (b) { b.classList.toggle('on', b.getAttribute('data-r') === rng); });
+    $('sh-c').textContent = c; $('sh-p').textContent = ''; $('sh-d').textContent = ''; $('lv').innerHTML = ''; $('ov').classList.add('on'); document.body.style.overflow = 'hidden';
+    lw().then(function () { build(); return fetchDraw(false); }).catch(function (e) { $('sh-s').textContent = e.message; });
+    clearInterval(timer); timer = setInterval(function () { if (chart) fetchDraw(true); }, 60000);
+  }
+  function closeChart() { $('ov').classList.remove('on'); document.body.style.overflow = ''; clearInterval(timer); if (chart) { chart.remove(); chart = null; } }
+  $('t').addEventListener('click', function (e) { var tr = e.target.closest && e.target.closest('tr.row'); if (tr) openChart(tr.getAttribute('data-c')); });
+  $('rg').addEventListener('click', function (e) { var r = e.target.getAttribute && e.target.getAttribute('data-r'); if (!r || !chart) return; rng = r; [].forEach.call(this.children, function (b) { b.classList.toggle('on', b === e.target); }); fetchDraw(false); });
+  $('sh-x').onclick = closeChart; $('ov').addEventListener('click', function (e) { if (e.target === this) closeChart(); }); document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeChart(); });
   load(); setInterval(load, 30000);
 })();
 </script>

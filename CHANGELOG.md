@@ -57,6 +57,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.46
+- My picks: Today column (% since the 7am close) and a tap-to-open candle chart per coin (Today / 1W / 1M / Since entry) with volume, entry and add-on lines and markers, next add-on level and liquidation line; new candles function (OKX perp, OKX spot, Gate.io fallback)
+
 ## v1.45
 - New: Daily report page (report.html). Every 7am close: totals, market move, highlights, desks ranked, 30-day leaderboard, My picks at the close, every leg; pick any past close; Download PDF
 
