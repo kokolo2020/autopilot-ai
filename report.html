@@ -34,7 +34,7 @@
     <a class="mut" href="/research">Back to research</a>
   </div>
   <div id="out"></div>
-  <p class="mut">Paper money. Net P&amp;L is after fees (and funding for Rev 3 and My picks). Fees column is an estimate from the fee rules: taker 0.055% per side, Rev 2 limit maker 0.02% on limit entries and 7am exits, spot 0.10% per side. Market move = median change of the tracked top-50 coins from the batch open to its close. The 30-day test restarted with the batch that opened 19 Oct 07:00 Bangkok (day 1 closes 20 Oct 07:00).</p>
+  <p class="mut">Paper money. Net P&amp;L is after fees and funding. Fees are the fees booked on each closed leg (taker 0.055% per side, Rev 2 limit maker 0.02% on limit entries and 7am exits, spot 0.10% per side). Funding is the real OKX funding paid or received while each perpetual leg was open (booked on every perpetual desk from v1.48; before that only Rev 3 and My picks). Market move = median change of the tracked top-50 coins from the batch open to its close. The 30-day test restarted with the batch that opened 19 Oct 07:00 Bangkok (day 1 closes 20 Oct 07:00).</p>
 </div>
 <script>
 (function () {
@@ -50,17 +50,20 @@
   var ymd = function (ms) { return new Date(ms + 7 * 3600000).toISOString().slice(0, 10); };
   var med = function (a) { a = a.filter(function (x) { return isFinite(x); }).sort(function (x, y) { return x - y; }); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null; };
   function snap(ms) { return get('ap_samples', 'select=coin,price,ts&ts=gte.' + new Date(ms - 8 * 60000).toISOString() + '&ts=lte.' + new Date(ms + 8 * 60000).toISOString() + '&order=ts.desc&limit=600').then(function (r) { var o = {}; r.forEach(function (x) { if (!o[x.coin]) o[x.coin] = +x.price; }); return o; }).catch(function () { return {}; }); }
+  var fundOf = function (p) { var m = /funding ([+-]?[\d.]+)/.exec(p.close_reason || ''); return m ? +m[1] : 0; };
+  var whyOf = function (p) { return String(p.close_reason || '').split(' | ')[0]; };
   function feeEst(p) {
+    if (p.fees != null && isFinite(+p.fees)) return +p.fees;
     var s = p.coin.split(':')[1], n = +p.notional;
     if (s === 'spl' || s === 'spm') return n * 0.002;
-    if (s === 'revm') return n * ((Math.abs(n - 400) < 1e-6 ? 0.0002 : 0.00055) + (p.close_reason === 'time exit' ? 0.0002 : 0.00055));
+    if (s === 'revm') return n * ((Math.abs(n - 400) < 1e-6 ? 0.0002 : 0.00055) + (whyOf(p) === 'time exit' ? 0.0002 : 0.00055));
     return n * 0.0011;
   }
   var ALL = [], PICKS = [], CLOSES = [];
   function deadline(p) { return Math.round(new Date(p.max_hold_until).getTime() / 3600000) * 3600000; }
   function load() {
     return Promise.all([
-      get('ap_positions', 'select=id,coin,side,entry_price,exit_price,notional,pnl,status,close_reason,opened_at,closed_at,max_hold_until&opened_at=gte.2026-10-18T00:00:00Z&status=in.(open,closed)&coin=like.*:*&order=id.asc&limit=6000'),
+      get('ap_positions', 'select=id,coin,side,entry_price,exit_price,notional,pnl,fees,status,close_reason,opened_at,closed_at,max_hold_until&opened_at=gte.2026-10-18T00:00:00Z&status=in.(open,closed)&coin=like.*:*&order=id.asc&limit=6000'),
       get('ap_positions', 'select=coin,status,entry_price,exit_price,notional,pnl,opened_at,closed_at,close_reason&coin=like.*:pick&order=id.asc&limit=300').catch(function () { return []; })
     ]).then(function (r) {
       ALL = r[0].filter(function (p) { return NAMES[p.coin.split(':')[1]]; }); PICKS = r[1];
@@ -86,9 +89,9 @@
       var ps = rows.filter(function (p) { return p.coin.split(':')[1] === s; }), closed = ps.filter(function (p) { return p.status === 'closed'; }), byCoin = {};
       closed.forEach(function (p) { var c = p.coin.split(':')[0] + ' ' + p.side; byCoin[c] = (byCoin[c] || 0) + +p.pnl; });
       var coins = Object.keys(byCoin).map(function (c) { return { c: c, v: byCoin[c] }; }).sort(function (x, y) { return y.v - x.v; });
-      var net = closed.reduce(function (t, p) { return t + +p.pnl; }, 0), fees = closed.reduce(function (t, p) { return t + feeEst(p); }, 0), stops = closed.filter(function (p) { return /stop|liquid/.test(p.close_reason || ''); }).length;
+      var net = closed.reduce(function (t, p) { return t + +p.pnl; }, 0), fees = closed.reduce(function (t, p) { return t + feeEst(p); }, 0), fund = closed.reduce(function (t, p) { return t + fundOf(p); }, 0), stops = closed.filter(function (p) { return /stop|liquid/.test(p.close_reason || ''); }).length;
       var cum = ALL.filter(function (p) { var d = deadline(p); return p.coin.split(':')[1] === s && p.status === 'closed' && d > TEST0 && d <= b; }).reduce(function (t, p) { return t + +p.pnl; }, 0);
-      return { s: s, name: NAMES[s], ps: ps, legs: coins.length, won: coins.filter(function (x) { return x.v > 0; }).length, net: net, fees: fees, stops: stops, best: coins[0], worst: coins[coins.length - 1], cum: cum, open: ps.length - closed.length };
+      return { s: s, name: NAMES[s], ps: ps, legs: coins.length, won: coins.filter(function (x) { return x.v > 0; }).length, net: net, fees: fees, fund: fund, stops: stops, best: coins[0], worst: coins[coins.length - 1], cum: cum, open: ps.length - closed.length };
     }).sort(function (x, y) { return y.net - x.net; });
     var tot = desks.reduce(function (t, d) { return t + d.net; }, 0), green = desks.filter(function (d) { return d.net > 0; }).length;
     var legsAll = []; desks.forEach(function (d) { d.ps.forEach(function (p) { if (p.status === 'closed') legsAll.push({ d: d.name, p: p }); }); }); legsAll.sort(function (x, y) { return +y.p.pnl - +x.p.pnl; });
@@ -107,15 +110,16 @@
     if (desks.length) hl.push('<b>' + esc(desks[0].name) + '</b> won the day with ' + money(desks[0].net) + '; <b>' + esc(desks[desks.length - 1].name) + '</b> was last with ' + money(desks[desks.length - 1].net) + '.');
     if (mv != null) hl.push('The market was <b>' + kind + '</b> (median ' + pct(mv) + (btc != null ? ', BTC ' + pct(btc) : '') + '). Neutral desks earn from the gap between weak and strong coins, not from the direction.');
     if (legsAll.length) { var bL = legsAll[0], wL = legsAll[legsAll.length - 1]; hl.push('Best single leg: ' + esc(bL.p.coin.split(':')[0]) + ' ' + bL.p.side.toLowerCase() + ' on ' + esc(bL.d) + ' ' + money(+bL.p.pnl) + '. Worst: ' + esc(wL.p.coin.split(':')[0]) + ' ' + wL.p.side.toLowerCase() + ' on ' + esc(wL.d) + ' ' + money(+wL.p.pnl) + '.'); }
+    var fT = desks.reduce(function (t, d) { return t + d.fund; }, 0), feT = desks.reduce(function (t, d) { return t + d.fees; }, 0); hl.push('Costs today: fees $' + feT.toFixed(2) + ', funding ' + money(fT) + ' (positive = received). Both are already inside net P&amp;L.');
     var st = desks.reduce(function (t, d) { return t + d.stops; }, 0); if (st) hl.push(st + ' stop(s) hit across all desks.');
     var r2 = get2('rev2'), rm = get2('revm'); if (r2 && rm) hl.push('Fee experiment: Rev 2 ' + money(r2.net) + ' (fees ~$' + r2.fees.toFixed(2) + ') vs Rev 2 limit ' + money(rm.net) + ' (fees ~$' + rm.fees.toFixed(2) + '). Fee saving ~$' + (r2.fees - rm.fees).toFixed(2) + '; the rest of the gap is different fills.');
     var rx = get2('revx'); if (rx) hl.push('Reverse extremes: ' + (rx.best ? esc(rx.best.c) + ' ' + money(rx.best.v) : '') + (rx.worst && rx.worst !== rx.best ? ', ' + esc(rx.worst.c) + ' ' + money(rx.worst.v) : '') + ' → ' + money(rx.net) + '.');
     var cp = get2('caprev'); if (!cp) hl.push('Capitulation Rev sat out (it only trades after the market fell 1%+ in 24h).');
     h += '<h2>Highlights</h2><div class="card"><ul class="hl">' + hl.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>';
     // desk table
-    h += '<h2>Desks, ranked by today\'s P&amp;L</h2><div class="scroll"><table class="rk"><tr><th>#</th><th>Desk</th><th>Coins</th><th>Won</th><th>Net P&amp;L</th><th>On $1,000</th><th>Fees (est.)</th><th>Stops</th><th>Best leg</th><th>Worst leg</th><th>Bank since restart</th></tr>';
+    h += '<h2>Desks, ranked by today\'s P&amp;L</h2><div class="scroll"><table class="rk"><tr><th>#</th><th>Desk</th><th>Coins</th><th>Won</th><th>Net P&amp;L</th><th>On $1,000</th><th>Fees</th><th>Funding</th><th>Stops</th><th>Best leg</th><th>Worst leg</th><th>Bank since restart</th></tr>';
     desks.forEach(function (d, i) { var bank = BANK + d.cum;
-      h += '<tr><td>' + (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1) + '</td><td style="text-align:left"><b>' + esc(d.name) + '</b>' + (d.open ? ' <span class="dn">(' + d.open + ' open)</span>' : '') + '</td><td>' + d.legs + '</td><td>' + d.won + '/' + d.legs + '</td><td class="' + cls(d.net) + '"><b>' + money(d.net) + '</b></td><td class="' + cls(d.net) + '">' + pct(d.net / BANK * 100) + '</td><td>$' + d.fees.toFixed(2) + '</td><td>' + (d.stops || '–') + '</td><td class="up">' + (d.best && d.best.v > 0 ? esc(d.best.c) + ' ' + money(d.best.v) : '–') + '</td><td class="dn">' + (d.worst && d.worst.v < 0 ? esc(d.worst.c) + ' ' + money(d.worst.v) : '–') + '</td><td>' + (b > TEST0 ? '<b>$' + bank.toFixed(2) + '</b> <span class="' + cls(d.cum) + '">' + pct(d.cum / BANK * 100) + '</span>' : '<span class="mut">–</span>') + '</td></tr>'; });
+      h += '<tr><td>' + (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1) + '</td><td style="text-align:left"><b>' + esc(d.name) + '</b>' + (d.open ? ' <span class="dn">(' + d.open + ' open)</span>' : '') + '</td><td>' + d.legs + '</td><td>' + d.won + '/' + d.legs + '</td><td class="' + cls(d.net) + '"><b>' + money(d.net) + '</b></td><td class="' + cls(d.net) + '">' + pct(d.net / BANK * 100) + '</td><td>$' + d.fees.toFixed(2) + '</td><td class="' + cls(d.fund) + '">' + (d.fund ? money(d.fund) : '–') + '</td><td>' + (d.stops || '–') + '</td><td class="up">' + (d.best && d.best.v > 0 ? esc(d.best.c) + ' ' + money(d.best.v) : '–') + '</td><td class="dn">' + (d.worst && d.worst.v < 0 ? esc(d.worst.c) + ' ' + money(d.worst.v) : '–') + '</td><td>' + (b > TEST0 ? '<b>$' + bank.toFixed(2) + '</b> <span class="' + cls(d.cum) + '">' + pct(d.cum / BANK * 100) + '</span>' : '<span class="mut">–</span>') + '</td></tr>'; });
     h += '</table></div>';
     // leaderboard since restart
     if (b > TEST0) {

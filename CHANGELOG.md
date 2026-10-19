@@ -59,6 +59,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.48
+- Real funding on every perpetual desk: OKX settlements paid or received while a leg is open are booked into its P&L at close (before: only Rev 3 and My picks). Funding history is prefetched in parallel at the 7am close. Daily report shows booked fees and funding per desk
+
 ## v1.47
 - New: 8h study page. Does closing every 8 hours (7am, 3pm, 11pm Bangkok) beat the 24h batch? 4-hour OKX history, per-day net after costs, per session, after falling markets, month by month
 

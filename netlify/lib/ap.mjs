@@ -197,22 +197,42 @@ export async function newsJob(env, coin) {
 
 /* ---------- Decision loop (runs every 5 min) ---------- */
 /* Funding paid or received by a Rev 3 position while it was open: every settlement between open and close, rate x notional, longs pay when the rate is positive. Booked into pnl when the position closes (no schema change), and noted in close_reason. */
-export async function rev3Funding(p, endMs = Date.now()) {
-  const t0 = new Date(p.opened_at).getTime(), sym = p.coin.split(':')[0] + '-USDT-SWAP', dir = p.side === 'LONG' ? 1 : -1; let after = '', sum = 0;
+/* Funding for one perpetual position: sum of OKX settlements (realized rate) after it opened and up to its close; a long pays when the rate is positive, a short receives.
+   Since v1.48 this is booked for EVERY perpetual desk (not only Rev 3 and My picks). Settlement history is fetched once per coin per tick and reused (FUND_CACHE), extra pages only for long holds. */
+const FUND_CACHE = new Map();
+async function fundHist(sym, t0) {
+  const hit = FUND_CACHE.get(sym);
+  if (hit && Date.now() - hit.at < 120000 && (hit.complete || hit.oldest <= t0)) return hit.rows;
+  let after = '', rows = [], complete = false;
   for (let i = 0; i < 12; i++) {
-    const h = await okx('/api/v5/public/funding-rate-history?instId=' + sym + '&limit=100' + (after ? '&after=' + after : ''));
-    if (!h || !h.length) break;
-    for (const x of h) { const t = +x.fundingTime, rate = x.realizedRate != null && x.realizedRate !== '' ? +x.realizedRate : +x.fundingRate; if (t > t0 && t <= endMs && isFinite(rate)) sum -= dir * +p.notional * rate; }
-    const oldest = +h[h.length - 1].fundingTime; if (oldest <= t0 || h.length < 100) break; after = h[h.length - 1].fundingTime;
+    const url = '/api/v5/public/funding-rate-history?instId=' + sym + '&limit=100' + (after ? '&after=' + after : '');
+    const h = await okx(url).catch(async (e) => { if (/51001|doesn't exist|does not exist/i.test(String(e.message))) return []; await new Promise((r) => setTimeout(r, 400)); return okx(url); }); // one retry (rate limit), none for coins without a perpetual
+    if (!h || !h.length) { complete = true; break; }
+    rows = rows.concat(h); const oldest = +h[h.length - 1].fundingTime;
+    if (h.length < 100) { complete = true; break; } if (oldest <= t0) break; after = h[h.length - 1].fundingTime;
   }
+  FUND_CACHE.set(sym, { at: Date.now(), rows, complete, oldest: rows.length ? +rows[rows.length - 1].fundingTime : Infinity });
+  return rows;
+}
+export async function rev3Funding(p, endMs = Date.now()) {
+  const t0 = new Date(p.opened_at).getTime(), sym = p.coin.split(':')[0] + '-USDT-SWAP', dir = p.side === 'LONG' ? 1 : -1; let sum = 0;
+  for (const x of await fundHist(sym, t0)) { const t = +x.fundingTime, rate = x.realizedRate != null && x.realizedRate !== '' ? +x.realizedRate : +x.fundingRate; if (t > t0 && t <= endMs && isFinite(rate)) sum -= dir * +p.notional * rate; }
   return sum;
+}
+export const perpFunded = (coin) => coin.includes(':') && !/:(sp[lm])$/.test(coin);
+/* warm the funding cache in parallel (8 at a time) for every perpetual leg that is due to close, so the 07:00 close does not fetch ~50 coins one by one */
+export async function prefetchFunding(rows, now = Date.now()) {
+  const due = {}; for (const p of rows) if (perpFunded(p.coin) && p.opened_at && p.max_hold_until && new Date(p.max_hold_until).getTime() <= now + 60000) { const sym = p.coin.split(':')[0] + '-USDT-SWAP', t0 = new Date(p.opened_at).getTime(); due[sym] = Math.min(due[sym] ?? Infinity, t0); }
+  const list = Object.entries(due);
+  for (let i = 0; i < list.length; i += 8) await Promise.all(list.slice(i, i + 8).map(([sym, t0]) => fundHist(sym, t0).catch(() => null)));
+  return list.length;
 }
 /* Non-perpetual paper desks. Spot: taker 0.10% per side, no leverage, no funding. Spot margin short: the coin is borrowed, so the short leg also pays borrow interest (ASSUMED 0.03% per day; OKX's real rate varies by coin and day). Prices come from the perpetual mid, so the spot/perp basis is ignored. */
 export const SPOT = { fee: 0.001, borrowPerDay: 0.0003, longLeg: 200, pairLeg: 100 };
 export const spotFees = (p, endMs) => +p.notional * SPOT.fee * 2 + (/:spm$/.test(p.coin) && p.side === 'SHORT' ? +p.notional * SPOT.borrowPerDay * Math.max(0, (endMs - new Date(p.opened_at).getTime()) / 864e5) : 0);
 const closePos = async (db, p, exit, why) => {
   const dir = p.side === 'LONG' ? 1 : -1;
-  const funding = /:(r3[dwmyl]|pick)$/.test(p.coin) ? await rev3Funding(p).catch(() => 0) : 0;
+  const funding = perpFunded(p.coin) && p.opened_at ? await rev3Funding(p).catch(() => 0) : 0;
   const fees = /:sp[lm]$/.test(p.coin) ? spotFees(p, Date.now()) : /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - RM * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + (String(why) === 'time exit' ? MAKER_FEE : FEE)) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
   await db.update('ap_positions', 'id=eq.' + p.id, { status: 'closed', exit_price: exit, closed_at: new Date().toISOString(), pnl, fees, close_reason: funding ? why + ' | funding ' + (funding >= 0 ? '+' : '') + funding.toFixed(2) : why });
   return pnl;
@@ -913,6 +933,7 @@ export async function tickAll(env) {
   const ctl = await loadControl(db); ctl.auto = await autoPaused(db, ctl.lossLimit);
   const openAll = await db.select('ap_positions', 'select=*&status=eq.open');
   const pulled = await pullDeadlines(db, openAll).catch(() => []);
+  const funded = await prefetchFunding(openAll).catch(() => 0);
   const open = openAll.filter((p) => !p.coin.includes(':')), openAlgo = {}, openMir = openAll.filter((p) => /:[nsumg]$/.test(p.coin)), cnt = { n: 0, a: 0, s: 0, u: 0, m: 0, g: 0 };
   for (const p of openAll) { const k = modeOf(p.coin); if (k) cnt[k]++; }
   const pend = await db.select('ap_positions', 'select=*&status=eq.pending').catch(() => []);
@@ -967,7 +988,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, deadlinesPulled: pulled.length, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */
