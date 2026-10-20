@@ -63,6 +63,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.51.1
+- AI signals: longer error message in logs (Claude API call is failing with HTTP 400)
+
 ## v1.51
 - New paper desk: AI signals (your old Volume Harvester bot rebuilt and tracked): Claude proposes up to 3 scalps every 30 min, TP 0.4-0.7%, SL 0.2-0.4%, max 3x, $100 margin, real taker fees and funding, 24h limit
 
