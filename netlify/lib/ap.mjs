@@ -11,7 +11,9 @@ export const REV_UNI = new Set(TOP.slice(0, TOP_N));
 /* 18 Oct reset: only the Rev family runs, $1,000 per strategy. Each leg is $100 margin (RM), 5 weakest long + 5 strongest short = 10 legs. Coins must also have at least REV_MIN_VOL USD of 24h volume. */
 export const RM = 100, REV_MIN_VOL = 10e6;
 export const revOk = (r) => REV_UNI.has(r.coin) && (r.vol_usd == null || r.vol_usd >= REV_MIN_VOL);
-export const RETIRED = new Set(['ai', 'n', 's', 'u', 'm', 'g', 'algo', 'algo2', 'algo3', 'algoq', 'algow', 'algox', 'algot', 'algo3b', 'algo100', 'rev100', 'flip', 'revv', 'r3w', 'r3m', 'r3y']);
+export const RETIRED = new Set(['ai', 'n', 's', 'u', 'm', 'g', 'algo', 'algo2', 'algo3', 'algoq', 'algow', 'algox', 'algot', 'algo3b', 'algo100', 'rev100', 'flip', 'revv', 'r3w', 'r3m', 'r3y',
+  /* retired 21 Oct 2026 (Koko: trim to the desks worth a full 30 days): no new batches or resets; legs already open run to their normal close */
+  'revs', 'rev2', 'rev2s', 'revx', 'spl', 'spm', 'r3d']);
 export const MAX_SPREAD_BPS = 12;
 /* Four AI desks read the SAME Claude decision and differ only in how easily they act on it. Each has its own $250 per coin.
    Normal ':n', Aggressive '' (the original desk), Super ':s', Ultra ':u'. picks = how many of the biggest movers it may trade. */
@@ -939,6 +941,44 @@ export function sigValid(s) {
   if (slPct < SIG.slMin || slPct > SIG.slMax || tpPct < SIG.tpMin || tpPct > SIG.tpMax || tpPct < slPct * SIG.rrMin) return null;
   return { dir, slPct, tpPct, lev: Math.max(1, Math.min(SIG.maxLev, Math.round(+s.leverage) || 1)) };
 }
+/* :trend Trend momentum (weekly, from 21 Oct 2026). Follow the trend instead of fighting it, and only when the market is in an up-trend.
+   Once a week, shortly after the 07:00 Bangkok close (07:10-07:25): if BTC is above its 200-day average, buy the 5 coins (top-50 universe) with the strongest 30-day return, $200 margin each at 2x
+   ($400 position each, $2,000 in total on the $1,000 desk), held 7 days, then rebalanced. Each leg has a -20% price stop (well before liquidation at 2x).
+   Every day after the 07:00 close: if BTC closes below its 200-day average, every trend leg is closed and the desk waits in cash. Taker fees and funding booked. Paper. */
+export const TREND = { k: 5, margin: 200, lev: 2, holdDays: 7, stop: 0.20, lookback: 30, sma: 200 };
+async function dailyCloses(inst, n) {
+  let out = [], after = '';
+  while (out.length < n) { const d = await okx('/api/v5/market/history-candles?instId=' + inst + '&bar=1Dutc&limit=100' + (after ? '&after=' + after : '')); if (!d || !d.length) break; out = out.concat(d.filter((k) => k[8] !== '0')); after = d[d.length - 1][0]; if (d.length < 100) break; }
+  return out.slice(0, n).map((k) => +k[4]); // newest first, confirmed daily closes
+}
+export function trendRegime(btcCloses) { if (btcCloses.length < TREND.sma) return null; const sma = btcCloses.slice(0, TREND.sma).reduce((a, b) => a + b, 0) / TREND.sma; return { above: btcCloses[0] > sma, btc: btcCloses[0], sma }; }
+export async function trendTick(db, rows, openPos, ctl, now = Date.now()) {
+  const out = [];
+  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' ' + x.why + ' ' + x.pnl.toFixed(2)); } }
+  const since = now - boundaryAt(now); if (since < 10 * 60000 || since > 25 * 60000) return out; // decide 10-25 minutes after the 07:00 close, away from the busy close tick
+  const reg = trendRegime(await dailyCloses('BTC-USDT', TREND.sma + 5));
+  if (!reg) return out.concat(['trend: not enough BTC history']);
+  const still = (await db.select('ap_positions', 'select=*&status=eq.open&coin=like.*:trend').catch(() => openPos.filter((p) => p.status === 'open')));
+  if (!reg.above) {
+    for (const p of still) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const v = await closePos(db, p, r.m.price, 'regime: BTC below 200-day average'); out.push(p.coin + ' closed (BTC below 200d) ' + v.toFixed(2)); } }
+    return out.concat(['trend: cash, BTC ' + reg.btc.toFixed(0) + ' below 200-day average ' + reg.sma.toFixed(0)]);
+  }
+  if (still.length || ctlBlocks(ctl, 'trend', '')) return out;
+  const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*:trend&order=opened_at.desc&limit=1').catch(() => []))[0];
+  if (!batchDue(last, now, TREND.holdDays)) return out;
+  const cand = rows.filter((r) => revOk(r) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS));
+  const ranked = [];
+  for (let i = 0; i < cand.length; i += 10) await Promise.all(cand.slice(i, i + 10).map(async (r) => { try { const c = await dailyCloses(r.coin + '-USDT', TREND.lookback + 1); if (c.length > TREND.lookback) ranked.push({ r, ret: r.m.price / c[TREND.lookback - 1] - 1 }); } catch (e) {} }));
+  ranked.sort((a, b) => b.ret - a.ret);
+  const deadline = new Date(nextClose(now, TREND.holdDays)).toISOString();
+  for (const { r, ret } of ranked.slice(0, TREND.k)) {
+    const px = r.m.price, d = decFor(px) + 2, notional = TREND.margin * TREND.lev;
+    await db.insert('ap_positions', { coin: r.coin + ':trend', side: 'LONG', entry_price: px, size: notional / px, notional, tp: +(px * 100).toFixed(d), sl: +(px * (1 - TREND.stop)).toFixed(d), max_hold_until: deadline });
+    out.push('trend opened LONG ' + r.coin + ' (30d ' + (ret * 100).toFixed(1) + '%)');
+  }
+  return out;
+}
+
 export async function sigTick(db, rows, openPos, ctl, env, now = Date.now()) {
   const out = [];
   for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' ' + x.why + ' ' + x.pnl.toFixed(2)); } }
@@ -1000,6 +1040,7 @@ export async function tickAll(env) {
   const dfcRes = await dfcTick(db, ctl).catch((e) => ['dfc error ' + String(e.message || e).slice(0, 80)]);
   const revwRes = await revVariantTick(db, rows, openRevw, ctl, 'revw').catch((e) => ['revw error ' + String(e.message || e).slice(0, 60)]);
   const rev2sRes = await rev2Tick(db, rows, openRev2s, ctl, 'rev2s').catch((e) => ['rev2s error ' + String(e.message || e).slice(0, 60)]);
+  const trendRes = await trendTick(db, rows, openAll.filter((p) => p.coin.endsWith(':trend')), ctl).catch((e) => ['trend error ' + String(e.message || e).slice(0, 80)]);
   const sigRes = await sigTick(db, rows, openAll.filter((p) => p.coin.endsWith(':sig')), ctl, env).catch((e) => ['sig error ' + String(e.message || e).slice(0, 60)]);
   const revxRes = await revxTick(db, rows, openRevx, ctl).catch((e) => ['revx error ' + String(e.message || e).slice(0, 60)]);
   const pickRes = await picksTick(db, ctl).catch((e) => ['pick error ' + String(e.message || e).slice(0, 80)]);
@@ -1024,7 +1065,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, sig: sigRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, sig: sigRes, trend: trendRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */

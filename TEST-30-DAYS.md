@@ -4,6 +4,8 @@
 
 > **19 Oct 2026 (v1.48): real OKX funding is now booked on every perpetual desk** (before: only Rev 3 and My picks). It is calculated at close over the whole time a leg was open, so day 1 (opened 19 Oct 07:00) is fully covered. Spot desks pay no funding.
 
+> **21 Oct 2026 (v1.52): trimmed.** Retired (no new batches; open legs run to their close): Neutral Rev 2, Rev 2 + winner exit, scale-out, Reverse extremes, Spot long-only, Spot margin Rev, Rev 3 daily. Kept for the full 30 days: Neutral Rev (baseline), Neutral Rev weekly, Rev 2 limit, Capitulation Rev, Rev 3 low-leverage, My picks, AI signals (paper; needs Anthropic credit). New: **Trend momentum** (weekly, long the 5 strongest 30-day coins only while BTC is above its 200-day average, otherwise cash).
+
 Rules fixed in advance so we can't move the goalposts. The first test (old $250-per-leg scale) was reset; its history is archived in `*_archive_1018`.
 
 - Strategies: Neutral Rev, Rev 2, Rev 2 limit, Rev 3 daily. Each has its own $1,000 bank.

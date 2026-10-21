@@ -64,6 +64,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.52
+- Trimmed: Rev 2, Rev 2 + winner exit, scale-out, Reverse extremes, both spot desks and Rev 3 daily retired (open legs run to their close). New: Trend momentum desk (weekly, long the 5 strongest 30-day coins while BTC is above its 200-day average, otherwise cash)
+
 ## v1.51.1
 - AI signals: longer error message in logs (Claude API call is failing with HTTP 400)
 
