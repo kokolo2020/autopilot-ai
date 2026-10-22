@@ -73,6 +73,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.55.2
+- Lab: Hyperliquid/OKX fetch errors are logged
+
 ## v1.55.1
 - Lab: hourly pairs z-score line in the decisions log
 

@@ -158,7 +158,7 @@ async function closeHL(db, p, exit, why) {
 }
 export async function fspTick(db, legs, tk, ctl, now, out) {
   const mn = new Date(now).getUTCMinutes(); if (!((mn >= 20 && mn < 25) || (mn >= 50 && mn < 55))) return;
-  let H, F; try { [H, F] = await Promise.all([hlMarkets(), allFunding()]); } catch (e) { out.push('fsp: ' + String(e.message || e).slice(0, 80)); return; }
+  let H, F; try { [H, F] = await Promise.all([hlMarkets(), allFunding()]); } catch (e) { out.push('fsp error: ' + String(e.message || e).slice(0, 80)); return; }
   const spread = (c) => { const f = F[c + '-USDT-SWAP'], h = H[c]; return f && h && isFinite(h.funding) ? annOkx(f) - annHl(h.funding) : null; };
   const held = [...new Set(legs.map((p) => p.coin.split(':')[0]))];
   for (const c of held) {
