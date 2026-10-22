@@ -77,6 +77,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.58.1
+- AI signals: more room for Claude's reply (2000 tokens) and the log says why a reply had no text
+
 ## v1.58
 - Lab: Residual momentum reversed desk; Funding-time drift booked at limit-order fees; backtest results in the test notes
 

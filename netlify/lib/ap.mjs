@@ -153,7 +153,7 @@ export function features(m) {
 const r4 = (x) => +Number(x).toFixed(4);
 
 /* ---------- Claude ---------- */
-async function claude(key, body) {
+async function claude(key, body, meta) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -161,6 +161,7 @@ async function claude(key, body) {
   });
   if (!r.ok) throw new Error('anthropic ' + r.status + ' ' + (await r.text()).slice(0, 300));
   const j = await r.json();
+  if (meta) { meta.stop = j.stop_reason; meta.blocks = (j.content || []).map((b) => b.type).join(','); }
   return (j.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
 }
 function lastJson(text) {
@@ -1070,10 +1071,10 @@ export async function sigTick(db, rows, openPos, ctl, env, now = Date.now()) {
     const r = rows.find((x) => x.coin === c), mom = r && r.F ? '\n15m: ' + r.F.ret_15m.toFixed(2) + '%\n1h: ' + r.F.ret_60m.toFixed(2) + '%\nDistance below 1h high: ' + r.F.pullback_pct.toFixed(2) + '%\nDistance above 1h low: ' + r.F.bounce_pct.toFixed(2) + '%' : '';
     msg += c + 'USDT\nPrice: $' + last + '\n24h: ' + ((last / o - 1) * 100).toFixed(2) + '%\n24h Range: ' + ((hi - lo) / lo * 100).toFixed(2) + '%' + mom + '\nVolume: $' + (+t.volCcy24h * last / 1e6).toFixed(0) + 'M\n\n'; }
   const prompt = 'You are a high-frequency crypto scanner.\n\nRULES:\n- TP distance must be between 0.5% and 2% from entry\n- SL distance must be between 0.3% and 1% from entry\n- TP must be at least 1.5x SL distance\n- Leverage: max 3x\n- Max 3 setups per run\n- Confidence 5 or higher\n- Both LONG and SHORT allowed\n- Match direction to short-term momentum\n- Skip extremely volatile (24h move above 6%)\n\nOUTPUT: JSON array only.\nFormat: [{"symbol":"BTCUSDT","direction":"LONG","entry":78000,"sl":77766,"tp":78390,"leverage":3,"confidence":6,"reason":"brief"}]\n\nIf nothing qualifies: []\n\nData:\n' + msg;
-  let arr = [], text = '';
-  try { text = await claude(env.ANTHROPIC_API_KEY, { max_tokens: 800, messages: [{ role: 'user', content: prompt }] }); const a = text.indexOf('['), b = text.lastIndexOf(']'); if (a >= 0 && b > a) arr = JSON.parse(text.slice(a, b + 1)); } catch (e) { out.push('sig claude error ' + String(e.message).replace(/\s+/g, ' ').slice(0, 260)); return out; }
+  let arr = [], text = ''; const meta = {};
+  try { text = await claude(env.ANTHROPIC_API_KEY, { max_tokens: 2000, messages: [{ role: 'user', content: prompt }] }, meta); const a = text.indexOf('['), b = text.lastIndexOf(']'); if (a >= 0 && b > a) arr = JSON.parse(text.slice(a, b + 1)); } catch (e) { out.push('sig claude error ' + String(e.message).replace(/\s+/g, ' ').slice(0, 260)); return out; }
   out.push('sig asked Claude: ' + (Array.isArray(arr) ? arr.length : 0) + ' setup(s) returned'); // so a quiet run shows in the log
-  await db.insert('ap_decisions', { coin: 'AI signals', action: Array.isArray(arr) && arr.length ? 'SIGNALS' : 'PASS', confidence: Array.isArray(arr) && arr.length ? 1 : 0, reason: ('Claude returned ' + (Array.isArray(arr) ? arr.length : 0) + ' setup(s). ' + (out.find((x) => /^sig error/.test(x)) || String(text).replace(/\s+/g, ' '))).slice(0, 340), price: 0, taken: false }).catch(() => null); // run log readable on the research page (Netlify drops logs written after the tick answers)
+  await db.insert('ap_decisions', { coin: 'AI signals', action: Array.isArray(arr) && arr.length ? 'SIGNALS' : 'PASS', confidence: Array.isArray(arr) && arr.length ? 1 : 0, reason: ('Claude returned ' + (Array.isArray(arr) ? arr.length : 0) + ' setup(s). ' + (out.find((x) => /^sig error/.test(x)) || String(text).replace(/\s+/g, ' ') || 'no text in reply (stop: ' + meta.stop + ', blocks: ' + meta.blocks + ')')).slice(0, 340), price: 0, taken: false }).catch(() => null); // run log readable on the research page (Netlify drops logs written after the tick answers)
   for (const s of (Array.isArray(arr) ? arr : []).slice(0, 3)) {
     const coin = String(s.symbol || '').replace(/USDT$/, '').toUpperCase(), v = sigValid(s), r = rows.find((x) => x.coin === coin);
     if (!SIG.coins.includes(coin)) continue;
