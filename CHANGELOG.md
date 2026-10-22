@@ -70,6 +70,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.54.2
+- AI signals writes each run (setups returned, Claude's reply) to the decisions log on the research page
+
 ## v1.54.1
 - AI signals logs how many setups Claude returned each run
 
