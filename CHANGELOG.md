@@ -68,6 +68,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.54
+- Scalp lab: momentum vs random quick trades in four TP/SL sizes, break-even win rates vs taker and maker fees; tick answers the scheduler at once (no more duplicate runs)
+
 ## v1.53.2
 - Rev 2 + winner exit and Spot long-only reactivated (in profit) and moved to the active group
 

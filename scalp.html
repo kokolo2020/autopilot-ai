@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot Scalp Lab</title>
+<style>
+  :root { --bg:#0b0f14; --card:#121922; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --acc:#6aa9ff; --up:#3ddc97; --dn:#ff6b6b; --gold:#f5c451; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f4f6f9; --card:#fff; --line:#dde3ea; --text:#17202b; --mut:#5b6b7d; --acc:#2c6fd6; --up:#1a8f5f; --dn:#c0392b; --gold:#b7861a; } }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:16px; } h1 { font-size:22px; margin:0; } h2 { font-size:15px; margin:24px 0 8px; }
+  .sub, .mut { color:var(--mut); font-size:12px; } a { color:var(--acc); }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0; }
+  .seg button { font:inherit; padding:6px 12px; border:1px solid var(--line); background:var(--card); color:var(--text); cursor:pointer; } .seg button:first-child { border-radius:10px 0 0 10px; } .seg button:last-child { border-radius:0 10px 10px 0; } .seg button.on { background:var(--acc); color:#fff; border-color:var(--acc); }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:12px; } .kpi { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; } .kpi .l { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.04em; } .kpi .v { font-size:19px; font-weight:700; margin-top:2px; }
+  .scroll { overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--card); } table { border-collapse:collapse; width:100%; font-size:13px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  th, td { padding:7px 10px; text-align:left; border-bottom:1px solid var(--line); } .num { text-align:right; } th { color:var(--mut); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; } tr:last-child td { border-bottom:0; }
+  tr.ctl td { color:var(--mut); } tr.sep td { border-top:2px solid var(--line); }
+  .up { color:var(--up); } .dn { color:var(--dn); } .gold { color:var(--gold); }
+  .tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:700; } .tag.ok { background:rgba(61,220,151,.15); color:var(--up); } .tag.no { background:rgba(255,107,107,.15); color:var(--dn); } .tag.wait { background:rgba(139,152,168,.15); color:var(--mut); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; } .card p { margin:6px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Scalp lab</h1>
+  <div class="sub" id="st">Loading...</div>
+  <div class="bar">
+    <span class="seg" id="per"><button data-h="0" class="on">All</button><button data-h="24">24h</button><button data-h="168">7 days</button></span>
+    <a class="mut" href="/research">Back to research</a>
+  </div>
+  <div class="card">
+    <p><b>The question:</b> can a quick trade win often enough to pay its fees? Every 15 minutes the lab opens two entries: <b>Momentum</b> (the coin whose 15-minute and 60-minute moves agree most strongly, traded in that direction) and <b>Random</b> (a random coin and side, the no-edge control). Each entry runs in four take-profit / stop-loss sizes. $500 per trade, 24h time limit, paper money.</p>
+    <p class="mut">Break-even win % = (stop + round-trip fee) / (take profit + stop). Taker fees are 0.11% round trip (OKX 0.055% per side); maker is 0.04% (0.02% per side, limit orders). A coin flip wins stop / (take profit + stop) of the time, so the random rows should sit near that line and lose about the fee. A setup only counts as an edge when its win % stays above break-even with 95% confidence (the "low" column).</p>
+  </div>
+  <div class="kpis" id="kpis"></div>
+  <h2>By setup</h2>
+  <div class="scroll" id="tbl"></div>
+  <h2>Latest trades</h2>
+  <div class="scroll" id="last"></div>
+  <p class="mut">"P&amp;L maker" is the same trades re-priced with maker fees both ways, the best case if every entry and exit were a filled limit order. In practice stops fill as market orders, so the real number would sit between the two columns. Started 22 Oct 2026.</p>
+</div>
+<script>
+(function () {
+  var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
+  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
+  var V = { 1: [0.3, 0.3], 2: [0.5, 0.25], 3: [1.0, 0.5], 4: [2.0, 1.0] }, TAKER = 0.11, MAKER = 0.04;
+  var $ = function (i) { return document.getElementById(i); };
+  var money = function (n) { return (n < 0 ? '-' : '+') + '$' + Math.abs(n).toFixed(2); }, cls = function (n) { return n < 0 ? 'dn' : n > 0 ? 'up' : 'mut'; };
+  var bkk = function (ms) { return new Date(ms).toLocaleString('en-GB', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+  function get(q) { return fetch(URL_ + 'ap_positions?' + q, { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error('ap_positions ' + r.status); return r.json(); }); }
+  var ALL = [], H = 0;
+  function load() {
+    var cols = 'select=id,coin,side,entry_price,exit_price,notional,pnl,fees,status,opened_at,closed_at,close_reason&or=(coin.like.*:sk1,coin.like.*:sk2,coin.like.*:sk3,coin.like.*:sk4,coin.like.*:sx1,coin.like.*:sx2,coin.like.*:sx3,coin.like.*:sx4)&order=opened_at.desc';
+    var out = [], page = function (off) { return get(cols + '&limit=1000&offset=' + off).then(function (r) { out = out.concat(r); return r.length === 1000 && off < 20000 ? page(off + 1000) : out; }); };
+    return page(0);
+  }
+  function render() {
+    var t0 = H ? Date.now() - H * 3600e3 : 0, P = ALL.filter(function (p) { return new Date(p.opened_at).getTime() >= t0; });
+    var closed = P.filter(function (p) { return p.status === 'closed'; });
+    var sum = function (a, f) { return a.reduce(function (s, p) { return s + f(p); }, 0); };
+    var makerPnl = function (p) { return +p.pnl + +p.notional * (TAKER - MAKER) / 100; };
+    var mom = closed.filter(function (p) { return /:sk\d$/.test(p.coin); }), ran = closed.filter(function (p) { return /:sx\d$/.test(p.coin); });
+    $('kpis').innerHTML = [
+      ['Trades closed', closed.length + ' <span class="mut" style="font-size:12px">+' + (P.length - closed.length) + ' open</span>'],
+      ['Momentum P&L (taker)', '<span class="' + cls(sum(mom, function (p) { return +p.pnl; })) + '">' + money(sum(mom, function (p) { return +p.pnl; })) + '</span>'],
+      ['Random P&L (taker)', '<span class="' + cls(sum(ran, function (p) { return +p.pnl; })) + '">' + money(sum(ran, function (p) { return +p.pnl; })) + '</span>'],
+      ['Fees paid', '$' + sum(closed, function (p) { return +p.fees || 0; }).toFixed(2)]
+    ].map(function (k) { return '<div class="kpi"><div class="l">' + k[0] + '</div><div class="v">' + k[1] + '</div></div>'; }).join('');
+    var h = '<table><tr><th>Setup</th><th>TP / SL</th><th class="num">Closed</th><th class="num">TP / SL / time</th><th class="num">Win %</th><th class="num">Low (95%)</th><th class="num">Coin flip</th><th class="num">Break-even taker</th><th class="num">Break-even maker</th><th class="num">P&amp;L taker</th><th class="num">P&amp;L maker</th><th class="num">Avg hold</th><th>Verdict</th></tr>';
+    ['sk', 'sx'].forEach(function (pre, gi) {
+      [1, 2, 3, 4].forEach(function (k, i) {
+        var re = new RegExp(':' + pre + k + '$'), a = closed.filter(function (p) { return re.test(p.coin); }), n = a.length;
+        var tp = V[k][0], sl = V[k][1], why = function (p) { return String(p.close_reason || '').split(' | ')[0]; };
+        var nTp = a.filter(function (p) { return why(p) === 'take profit hit'; }).length, nSl = a.filter(function (p) { return why(p) === 'stop hit'; }).length, nT = n - nTp - nSl;
+        var w = a.filter(function (p) { return +p.pnl > 0; }).length, wr = n ? w / n * 100 : null, lo = n ? Math.max(0, wr - 196 * Math.sqrt((w / n) * (1 - w / n) / n)) : null;
+        var flip = sl / (tp + sl) * 100, beT = (sl + TAKER) / (tp + sl) * 100, beM = (sl + MAKER) / (tp + sl) * 100;
+        var pT = sum(a, function (p) { return +p.pnl; }), pM = sum(a, makerPnl);
+        var hold = n ? sum(a, function (p) { return new Date(p.closed_at) - new Date(p.opened_at); }) / n / 60000 : null;
+        var verdict = n < 100 ? '<span class="tag wait">need 100+ (' + n + ')</span>' : lo > beT ? '<span class="tag ok">edge after taker fees</span>' : lo > beM ? '<span class="tag ok">edge with maker fees only</span>' : wr > beM ? '<span class="tag wait">not proven</span>' : '<span class="tag no">below fees</span>';
+        h += '<tr class="' + (gi ? 'ctl' : '') + (gi && !i ? ' sep' : '') + '"><td><b>' + (gi ? 'Random' : 'Momentum') + '</b></td><td>' + tp + '% / ' + sl + '%</td><td class="num">' + n + '</td><td class="num">' + nTp + ' / ' + nSl + ' / ' + nT + '</td><td class="num">' + (wr == null ? '–' : wr.toFixed(1) + '%') + '</td><td class="num">' + (lo == null ? '–' : lo.toFixed(1) + '%') + '</td><td class="num">' + flip.toFixed(1) + '%</td><td class="num gold">' + beT.toFixed(1) + '%</td><td class="num">' + beM.toFixed(1) + '%</td><td class="num ' + cls(pT) + '">' + money(pT) + '</td><td class="num ' + cls(pM) + '">' + money(pM) + '</td><td class="num">' + (hold == null ? '–' : hold < 120 ? Math.round(hold) + 'm' : (hold / 60).toFixed(1) + 'h') + '</td><td>' + verdict + '</td></tr>';
+      });
+    });
+    $('tbl').innerHTML = h + '</table>';
+    var L = P.slice(0, 40);
+    $('last').innerHTML = '<table><tr><th>Opened</th><th>Setup</th><th>Coin</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th><th>Result</th><th class="num">Net P&amp;L</th></tr>' + (L.length ? L.map(function (p) {
+      var s = p.coin.split(':'), k = s[1].slice(2), pre = s[1].slice(0, 2);
+      return '<tr><td>' + bkk(new Date(p.opened_at).getTime()) + '</td><td>' + (pre === 'sk' ? 'Momentum' : 'Random') + ' ' + V[k][0] + '/' + V[k][1] + '</td><td>' + s[0] + '</td><td>' + p.side + '</td><td class="num">' + (+p.entry_price) + '</td><td class="num">' + (p.exit_price == null ? '–' : +p.exit_price) + '</td><td>' + (p.status === 'open' ? '<span class="mut">open</span>' : String(p.close_reason || '').split(' | ')[0]) + '</td><td class="num ' + (p.pnl == null ? 'mut' : cls(+p.pnl)) + '">' + (p.pnl == null ? '–' : money(+p.pnl)) + '</td></tr>';
+    }).join('') : '<tr><td colspan="8" class="mut">No trades yet. The first entries open at the next 15-minute mark.</td></tr>') + '</table>';
+    $('st').textContent = 'Paper money · ' + ALL.length + ' trades since 22 Oct · updated ' + bkk(Date.now()) + ' Bangkok';
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('#per button'), function (b) { b.onclick = function () { Array.prototype.forEach.call(document.querySelectorAll('#per button'), function (x) { x.classList.toggle('on', x === b); }); H = +b.dataset.h; render(); }; });
+  function refresh() { load().then(function (r) { ALL = r; render(); }).catch(function (e) { $('st').textContent = 'Could not load: ' + e.message; }); }
+  refresh(); setInterval(refresh, 60000);
+})();
+</script>
+</body>
+</html>

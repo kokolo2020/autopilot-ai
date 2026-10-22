@@ -1028,6 +1028,35 @@ export async function crashTick(db, rows, openPos, ctl, now = Date.now()) {
   return out;
 }
 
+/* Scalp lab (paper, from 22 Oct 2026): does any quick-trade setup beat its fees? Every 15 minutes two entries are made:
+   :sk1-4 MOMENTUM - the coin whose 15-minute and 60-minute moves agree most strongly, traded in that direction;
+   :sx1-4 RANDOM   - a random coin and a random side (the no-edge control).
+   Each entry is opened in four TP/SL variants (percent of price): 1 = 0.3/0.3, 2 = 0.5/0.25, 3 = 1.0/0.5, 4 = 2.0/1.0. $100 margin x5 = $500 per trade,
+   24h time limit, stop checked before take profit inside the same minute. pnl is booked with taker fees (0.11% round trip); scalp.html also shows the maker-fee version. */
+export const SCALP = { v: { 1: [0.3, 0.3], 2: [0.5, 0.25], 3: [1.0, 0.5], 4: [2.0, 1.0] }, notional: 500, everyMin: 15, holdH: 24 };
+export async function scalpTick(db, rows, openPos, ctl, now = Date.now(), rnd = Math.random) {
+  const out = [];
+  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const t0 = new Date(p.opened_at).getTime(); const x = await manageOpen(db, p, Object.assign({}, r.m, { candles: r.m.candles.filter((k) => k.t >= t0) })).catch(() => null); /* only candles that start after entry: with 0.3% targets the entry minute's earlier range would fake hits */ if (x && x.closed) out.push(p.coin + ' ' + x.why.split(' ')[0] + ' ' + x.pnl.toFixed(2)); } }
+  if (now % (SCALP.everyMin * 60000) >= 5 * 60000 || ctlBlocks(ctl, 'scalp', '')) return out;
+  const last = (await db.select('ap_positions', 'select=opened_at&or=(coin.like.*:sk1,coin.like.*:sx1)&order=opened_at.desc&limit=1').catch(() => []))[0];
+  if (last && now - new Date(last.opened_at).getTime() < 10 * 60000) return out; // this 15-minute slot already traded
+  const u = rows.filter((r) => revOk(r) && r.F && isFinite(r.F.ret_15m) && isFinite(r.F.ret_60m) && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS));
+  if (u.length < 10) return out;
+  const score = (r) => (Math.sign(r.F.ret_15m) === Math.sign(r.F.ret_60m) ? Math.min(Math.abs(r.F.ret_15m) * 2, Math.abs(r.F.ret_60m)) : 0);
+  const mom = u.slice().sort((a, b) => score(b) - score(a))[0], ran = u[Math.floor(rnd() * u.length)];
+  const picks = [];
+  if (mom && score(mom) > 0) picks.push(['sk', mom, mom.F.ret_15m > 0 ? 1 : -1]);
+  if (ran) picks.push(['sx', ran, rnd() < 0.5 ? 1 : -1]);
+  const ins = [];
+  for (const [pre, r, dir] of picks) for (const k of [1, 2, 3, 4]) {
+    if (openPos.some((p) => p.coin === r.coin + ':' + pre + k)) continue;
+    const [tp, sl] = SCALP.v[k], px = r.m.price, d = decFor(px) + 2;
+    ins.push({ coin: r.coin + ':' + pre + k, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: px, size: SCALP.notional / px, notional: SCALP.notional, tp: +(px * (1 + dir * tp / 100)).toFixed(d), sl: +(px * (1 - dir * sl / 100)).toFixed(d), max_hold_until: new Date(now + SCALP.holdH * 3600e3).toISOString() });
+  }
+  if (ins.length) { await db.insertMany('ap_positions', ins); out.push('scalp opened ' + picks.map((x) => (x[0] === 'sk' ? 'momentum ' : 'random ') + (x[2] > 0 ? 'LONG ' : 'SHORT ') + x[1].coin).join(', ') + ' x4 variants'); }
+  return out;
+}
+
 export async function sigTick(db, rows, openPos, ctl, env, now = Date.now()) {
   const out = [];
   for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' ' + x.why + ' ' + x.pnl.toFixed(2)); } }
@@ -1089,6 +1118,7 @@ export async function tickAll(env) {
   const dfcRes = await dfcTick(db, ctl).catch((e) => ['dfc error ' + String(e.message || e).slice(0, 80)]);
   const revwRes = await revVariantTick(db, rows, openRevw, ctl, 'revw').catch((e) => ['revw error ' + String(e.message || e).slice(0, 60)]);
   const rev2sRes = await rev2Tick(db, rows, openRev2s, ctl, 'rev2s').catch((e) => ['rev2s error ' + String(e.message || e).slice(0, 60)]);
+  const scalpRes = await scalpTick(db, rows, openAll.filter((p) => /:s[kx][1-4]$/.test(p.coin)), ctl).catch((e) => ['scalp error ' + String(e.message || e).slice(0, 80)]);
   const tholdRes = await tholdTick(db, rows, openAll.filter((p) => p.coin.endsWith(':thold')), ctl).catch((e) => ['thold error ' + String(e.message || e).slice(0, 80)]);
   const crashRes = await crashTick(db, rows, openAll.filter((p) => p.coin.endsWith(':crash')), ctl).catch((e) => ['crash error ' + String(e.message || e).slice(0, 80)]);
   const trendRes = await trendTick(db, rows, openAll.filter((p) => p.coin.endsWith(':trend')), ctl).catch((e) => ['trend error ' + String(e.message || e).slice(0, 80)]);
@@ -1116,7 +1146,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, sig: sigRes, trend: trendRes, thold: tholdRes, crash: crashRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, sig: sigRes, trend: trendRes, thold: tholdRes, crash: crashRes, scalp: scalpRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */
