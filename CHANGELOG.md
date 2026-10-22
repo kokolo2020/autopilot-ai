@@ -66,6 +66,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.53.1
+- Research table grouped: New desks (purple), Active 30-day test desks, Retired 21 Oct (grey, kept for comparison)
+
 ## v1.53
 - New desks: Trend hold (BTC/ETH/SOL at 2x, held only above their own 100-day average) and Crash buyer (5 weakest after a 3%+ market drop, 3-day hold). Trend momentum now buys only coins up over 30 days. Old desks kept for comparison
 
