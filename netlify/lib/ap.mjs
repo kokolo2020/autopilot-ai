@@ -942,6 +942,7 @@ export function sigValid(s) {
   return { dir, slPct, tpPct, lev: Math.max(1, Math.min(SIG.maxLev, Math.round(+s.leverage) || 1)) };
 }
 /* :trend Trend momentum (weekly, from 21 Oct 2026). Follow the trend instead of fighting it, and only when the market is in an up-trend.
+   v1.53: only coins with a positive 30-day return are bought (absolute momentum); fewer than 5 qualifying means part of the desk stays in cash.
    Once a week, shortly after the 07:00 Bangkok close (07:10-07:25): if BTC is above its 200-day average, buy the 5 coins (top-50 universe) with the strongest 30-day return, $200 margin each at 2x
    ($400 position each, $2,000 in total on the $1,000 desk), held 7 days, then rebalanced. Each leg has a -20% price stop (well before liquidation at 2x).
    Every day after the 07:00 close: if BTC closes below its 200-day average, every trend leg is closed and the desk waits in cash. Taker fees and funding booked. Paper. */
@@ -971,10 +972,58 @@ export async function trendTick(db, rows, openPos, ctl, now = Date.now()) {
   for (let i = 0; i < cand.length; i += 10) await Promise.all(cand.slice(i, i + 10).map(async (r) => { try { const c = await dailyCloses(r.coin + '-USDT', TREND.lookback + 1); if (c.length > TREND.lookback) ranked.push({ r, ret: r.m.price / c[TREND.lookback - 1] - 1 }); } catch (e) {} }));
   ranked.sort((a, b) => b.ret - a.ret);
   const deadline = new Date(nextClose(now, TREND.holdDays)).toISOString();
-  for (const { r, ret } of ranked.slice(0, TREND.k)) {
+  const winners = ranked.filter((x) => x.ret > 0).slice(0, TREND.k); // v1.53: only coins that are actually up over 30 days; the rest of the money stays in cash
+  if (!winners.length) out.push('trend: no coin is up over 30 days, cash this week');
+  for (const { r, ret } of winners) {
     const px = r.m.price, d = decFor(px) + 2, notional = TREND.margin * TREND.lev;
     await db.insert('ap_positions', { coin: r.coin + ':trend', side: 'LONG', entry_price: px, size: notional / px, notional, tp: +(px * 100).toFixed(d), sl: +(px * (1 - TREND.stop)).toFixed(d), max_hold_until: deadline });
     out.push('trend opened LONG ' + r.coin + ' (30d ' + (ret * 100).toFixed(1) + '%)');
+  }
+  return out;
+}
+
+/* :thold Trend hold (from 22 Oct 2026). The "hold good coins with controlled risk" idea as a rule: BTC $400, ETH $300, SOL $300 of margin at 2x, each held only while
+   its daily close is above its own 100-day average; below it, that coin is sold and waits in cash until it closes back above. Checked once a day just after the 07:00 close.
+   A -30% price stop per coin guards against a crash between checks. Very few trades, so fees stay low. Taker fees and funding booked. Paper. */
+export const THOLD = { coins: { BTC: 400, ETH: 300, SOL: 300 }, lev: 2, sma: 100, stop: 0.30 };
+export async function tholdTick(db, rows, openPos, ctl, now = Date.now()) {
+  const out = [];
+  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' ' + x.why + ' ' + x.pnl.toFixed(2)); } }
+  const since = now - boundaryAt(now); if (since < 10 * 60000 || since > 25 * 60000) return out;
+  const open = await db.select('ap_positions', 'select=*&status=eq.open&coin=like.*:thold').catch(() => openPos);
+  for (const c of Object.keys(THOLD.coins)) {
+    const r = rows.find((x) => x.coin === c); if (!r) continue;
+    let closes; try { closes = await dailyCloses(c + '-USDT', THOLD.sma + 2); } catch (e) { out.push('thold ' + c + ' history error'); continue; }
+    if (closes.length < THOLD.sma) continue;
+    const sma = closes.slice(0, THOLD.sma).reduce((a, b) => a + b, 0) / THOLD.sma, above = closes[0] > sma, mine = open.filter((p) => p.coin === c + ':thold');
+    if (!above && mine.length) { for (const p of mine) { const v = await closePos(db, p, r.m.price, 'trend exit: close below 100-day average'); out.push(c + ':thold sold (below 100d) ' + v.toFixed(2)); } }
+    else if (above && !mine.length && !ctlBlocks(ctl, 'thold', c)) {
+      const px = r.m.price, d = decFor(px) + 2, notional = THOLD.coins[c] * THOLD.lev;
+      await db.insert('ap_positions', { coin: c + ':thold', side: 'LONG', entry_price: px, size: notional / px, notional, tp: +(px * 100).toFixed(d), sl: +(px * (1 - THOLD.stop)).toFixed(d), max_hold_until: '2099-12-31T00:00:00Z' });
+      out.push('thold bought ' + c + ' (close ' + closes[0] + ' above 100d ' + sma.toFixed(2) + ')');
+    } else out.push('thold ' + c + (above ? ' holding (above 100d)' : ' cash (below 100d)'));
+  }
+  return out;
+}
+/* :crash Crash buyer (from 22 Oct 2026). The one pattern the 5-year study liked: after the market falls hard, the weakest coins bounce over the next few days.
+   At the 07:00 close, only if the average top-50 coin is down 3% or more over 24h: buy the 5 weakest, $100 margin each at 3x, hold 3 days (-15% price stop). Otherwise cash. Paper. */
+export const CRASH = { trigger: -3, k: 5, margin: 100, lev: 3, holdDays: 3, stop: 0.15 };
+export async function crashTick(db, rows, openPos, ctl, now = Date.now()) {
+  const out = [];
+  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' ' + x.why + ' ' + x.pnl.toFixed(2)); } }
+  const since = now - boundaryAt(now); if (since < 10 * 60000 || since > 25 * 60000) return out;
+  if (openPos.length || ctlBlocks(ctl, 'crash', '')) return out;
+  const u = rows.filter((r) => revOk(r) && r.m.change24h_pct != null && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS));
+  if (u.length < 20) return out;
+  const mk = u.reduce((t, r) => t + r.m.change24h_pct, 0) / u.length;
+  if (mk > CRASH.trigger) return out.concat(['crash waiting: market 24h ' + mk.toFixed(2) + '% (needs ' + CRASH.trigger + '% or worse)']);
+  const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*:crash&order=opened_at.desc&limit=1').catch(() => []))[0];
+  if (last && now - new Date(last.opened_at).getTime() < 20 * 3600e3) return out;
+  const deadline = new Date(nextClose(now, CRASH.holdDays)).toISOString();
+  for (const r of u.sort((a, b) => a.m.change24h_pct - b.m.change24h_pct).slice(0, CRASH.k)) {
+    const px = r.m.price, d = decFor(px) + 2, notional = CRASH.margin * CRASH.lev;
+    await db.insert('ap_positions', { coin: r.coin + ':crash', side: 'LONG', entry_price: px, size: notional / px, notional, tp: +(px * 100).toFixed(d), sl: +(px * (1 - CRASH.stop)).toFixed(d), max_hold_until: deadline });
+    out.push('crash bought ' + r.coin + ' (' + r.m.change24h_pct.toFixed(1) + '% 24h, market ' + mk.toFixed(1) + '%)');
   }
   return out;
 }
@@ -1040,6 +1089,8 @@ export async function tickAll(env) {
   const dfcRes = await dfcTick(db, ctl).catch((e) => ['dfc error ' + String(e.message || e).slice(0, 80)]);
   const revwRes = await revVariantTick(db, rows, openRevw, ctl, 'revw').catch((e) => ['revw error ' + String(e.message || e).slice(0, 60)]);
   const rev2sRes = await rev2Tick(db, rows, openRev2s, ctl, 'rev2s').catch((e) => ['rev2s error ' + String(e.message || e).slice(0, 60)]);
+  const tholdRes = await tholdTick(db, rows, openAll.filter((p) => p.coin.endsWith(':thold')), ctl).catch((e) => ['thold error ' + String(e.message || e).slice(0, 80)]);
+  const crashRes = await crashTick(db, rows, openAll.filter((p) => p.coin.endsWith(':crash')), ctl).catch((e) => ['crash error ' + String(e.message || e).slice(0, 80)]);
   const trendRes = await trendTick(db, rows, openAll.filter((p) => p.coin.endsWith(':trend')), ctl).catch((e) => ['trend error ' + String(e.message || e).slice(0, 80)]);
   const sigRes = await sigTick(db, rows, openAll.filter((p) => p.coin.endsWith(':sig')), ctl, env).catch((e) => ['sig error ' + String(e.message || e).slice(0, 60)]);
   const revxRes = await revxTick(db, rows, openRevx, ctl).catch((e) => ['revx error ' + String(e.message || e).slice(0, 60)]);
@@ -1065,7 +1116,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, sig: sigRes, trend: trendRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, sig: sigRes, trend: trendRes, thold: tholdRes, crash: crashRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */

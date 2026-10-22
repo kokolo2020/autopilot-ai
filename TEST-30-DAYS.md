@@ -59,3 +59,5 @@ After each 20:00 close, the previous Neutral Rev batch's best and worst legs (by
 Koko's own 20 coins (ZEN, NEAR, OP, ARB, RUNE, JTO, MON, EGLD, HYPE, SOL, SUI, GRAM, WLD, VVV, JUP, RAY, AERO, XRP, AVAX, CARDS): $250 margin each at 3x on OKX perpetuals ($750 notional, $5,000 total), all long (assumed), opened once and held, no daily close. Closed as "liquidated" at -32%. Coins with no OKX USDT perpetual are skipped and retried each tick. Page: /picks.html.
 My picks add-on: once a coin trades 18% below its first entry, add $100 margin at 3x (one add-on per coin, its own isolated line).
 My picks ladder: the add-on repeats each time a coin is another 18% below its latest entry, up to 4 add-ons per coin.
+
+> **22 Oct 2026 (v1.53): two new desks, old ones kept for comparison.** Trend hold (BTC/ETH/SOL at 2x, each held only above its own 100-day average) and Crash buyer (cash unless the market falls 3%+ in 24h, then the 5 weakest for 3 days). Trend momentum now only buys coins that are up over 30 days. Funding carry: no slot has qualified since the reset (top-coin funding is below its 0.03%/8h entry level), so it stays as is.
