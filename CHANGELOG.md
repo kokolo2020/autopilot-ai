@@ -74,6 +74,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.56
+- My trades: journal for real trades entered by hand (PIN-protected saves), daily goal tracker, balance vs goal chart
+
 ## v1.55.2
 - Lab: Hyperliquid/OKX fetch errors are logged
 

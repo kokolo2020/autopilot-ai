@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autopilot My Trades</title>
+<style>
+  :root { --bg:#0b0f14; --card:#121922; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --acc:#6aa9ff; --up:#3ddc97; --dn:#ff6b6b; --gold:#f5c451; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f4f6f9; --card:#fff; --line:#dde3ea; --text:#17202b; --mut:#5b6b7d; --acc:#2c6fd6; --up:#1a8f5f; --dn:#c0392b; --gold:#b7861a; } }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:16px; } h1 { font-size:22px; margin:0; } h2 { font-size:15px; margin:24px 0 8px; }
+  .sub, .mut { color:var(--mut); font-size:12px; } a { color:var(--acc); }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:12px; } .kpi { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; } .kpi .l { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.04em; } .kpi .v { font-size:19px; font-weight:700; margin-top:2px; } .kpi .s { color:var(--mut); font-size:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+  label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--mut); }
+  input, select, button { font:inherit; padding:8px 10px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--text); min-width:0; }
+  button { cursor:pointer; font-weight:600; background:var(--card); } button.pri { background:var(--acc); color:#fff; border-color:var(--acc); }
+  .seg { display:flex; } .seg button { flex:1; border-radius:0; } .seg button:first-child { border-radius:10px 0 0 10px; } .seg button:last-child { border-radius:0 10px 10px 0; } .seg button.on.l { background:var(--up); color:#04150d; border-color:var(--up); } .seg button.on.s { background:var(--dn); color:#fff; border-color:var(--dn); }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:10px; }
+  .scroll { overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--card); } table { border-collapse:collapse; width:100%; font-size:13px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  th, td { padding:7px 10px; text-align:left; border-bottom:1px solid var(--line); } .num { text-align:right; } th { color:var(--mut); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; } tr:last-child td { border-bottom:0; }
+  .up { color:var(--up); } .dn { color:var(--dn); } .gold { color:var(--gold); }
+  .x { background:none; border:0; color:var(--mut); padding:2px 6px; } .x:hover { color:var(--dn); }
+  svg text { fill:var(--mut); font-size:11px; }
+  .msg { font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>My trades</h1>
+  <div class="sub">Your real trades, entered by hand, measured against your daily goal. Nothing here connects to an exchange. <a href="/research">Back to research</a></div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <h2>Balance vs the goal</h2>
+  <div class="card"><div id="chart" class="mut">No trades yet.</div></div>
+
+  <h2>Add a trade</h2>
+  <div class="card">
+    <div class="grid">
+      <label>Closed at<input id="fAt" type="datetime-local"></label>
+      <label>Coin<input id="fCoin" placeholder="NEAR" autocapitalize="characters"></label>
+      <label>Side<span class="seg"><button type="button" id="sL" class="l">Long</button><button type="button" id="sS" class="s on">Short</button></span></label>
+      <label>Entry price<input id="fEntry" inputmode="decimal" placeholder="5.001"></label>
+      <label>Exit price<input id="fExit" inputmode="decimal" placeholder="4.800"></label>
+      <label>Quantity (coins)<input id="fQty" inputmode="decimal" placeholder="83.3"></label>
+      <label>Fees (USDT, total)<input id="fFees" inputmode="decimal" placeholder="0.45"></label>
+      <label>Funding (USDT, + received)<input id="fFund" inputmode="decimal" placeholder="0.04"></label>
+      <label>Leverage<input id="fLev" inputmode="decimal" placeholder="2"></label>
+      <label>Exchange<select id="fEx"><option>KuCoin</option><option>Hyperliquid</option><option>Other</option></select></label>
+    </div>
+    <div class="grid" style="margin-top:10px"><label>Note (why you took it, what you learned)<input id="fNote" maxlength="200" placeholder="short after 4% drop, TP 4%, SL 1%"></label></div>
+    <div class="row"><input id="pin" type="password" inputmode="numeric" placeholder="PIN" style="width:120px"><button class="pri" id="add" type="button">Save trade</button><span class="msg mut" id="msg"></span></div>
+    <div class="mut" id="preview" style="margin-top:6px"></div>
+  </div>
+
+  <h2>Day by day (Bangkok)</h2>
+  <div class="scroll" id="days"></div>
+  <h2>Trades</h2>
+  <div class="scroll" id="list"></div>
+
+  <h2>Settings</h2>
+  <div class="card row" style="margin-top:0"><label>Starting balance (USDT)<input id="start" inputmode="decimal" style="width:140px"></label><label>Daily goal (%)<input id="goal" inputmode="decimal" style="width:100px"></label><span class="mut">Kept on this device only.</span></div>
+  <p class="mut">P&amp;L = (exit − entry) × quantity for longs (the reverse for shorts) − fees + funding. "Day %" compares the day's P&amp;L with the balance at the start of that day. The goal line compounds the daily goal from your first trading day. The PIN is the same as the control page.</p>
+</div>
+<script>
+(function () {
+  var URL_ = 'https://seiqqvplosnwquaksshm.supabase.co/rest/v1/';
+  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaXFxdnBsb3Nud3F1YWtzc2htIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNTAzMTUsImV4cCI6MjA5ODYyNjMxNX0.FPcGOaZqdAXje_BI1a8BKYQrMi5uS2zm0Oy3hopZdho';
+  var $ = function (i) { return document.getElementById(i); };
+  var money = function (n) { return (n < 0 ? '-' : '+') + '$' + Math.abs(n).toFixed(2); }, cls = function (n) { return n < 0 ? 'dn' : n > 0 ? 'up' : 'mut'; };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var store = { get: function (k, d) { try { var v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } }, set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+  var bkkDay = function (ms) { return new Date(ms + 7 * 3600e3).toISOString().slice(0, 10); };
+  var bkk = function (ms) { return new Date(ms).toLocaleString('en-GB', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+  var side = 'SHORT', T = [];
+  $('start').value = store.get('mt_start', '350'); $('goal').value = store.get('mt_goal', '10');
+  try { $('pin').value = sessionStorage.getItem('mt_pin') || ''; } catch (e) {}
+  var nowLocal = function () { var d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000); return d.toISOString().slice(0, 16); };
+  $('fAt').value = nowLocal();
+  function setSide(s) { side = s; $('sL').className = 'l' + (s === 'LONG' ? ' on' : ''); $('sS').className = 's' + (s === 'SHORT' ? ' on' : ''); preview(); }
+  $('sL').onclick = function () { setSide('LONG'); }; $('sS').onclick = function () { setSide('SHORT'); };
+  function form() { return { at: new Date($('fAt').value).toISOString(), coin: $('fCoin').value, side: side, entry: $('fEntry').value, exit: $('fExit').value, qty: $('fQty').value, fees: $('fFees').value, funding: $('fFund').value, lev: $('fLev').value, exchange: $('fEx').value, note: $('fNote').value }; }
+  function calc(t) { var d = t.side === 'LONG' ? 1 : -1; return d * (+t.exit - +t.entry) * +t.qty - (+t.fees || 0) + (+t.funding || 0); }
+  function preview() { var t = form(); if (+t.entry > 0 && +t.exit > 0 && +t.qty > 0) { var p = calc(t); $('preview').innerHTML = 'This trade: <b class="' + cls(p) + '">' + money(p) + '</b> on $' + (+t.entry * +t.qty).toFixed(0) + ' position'; } else $('preview').textContent = ''; }
+  ['fEntry', 'fExit', 'fQty', 'fFees', 'fFund'].forEach(function (i) { $(i).oninput = preview; });
+  ['start', 'goal'].forEach(function (i) { $(i).onchange = function () { store.set('mt_' + i, $(i).value); render(); }; });
+  function post(body) {
+    body.pin = $('pin').value; try { sessionStorage.setItem('mt_pin', body.pin); } catch (e) {}
+    return fetch('/.netlify/functions/mytrades', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error + (j.triesLeft != null ? ' (' + j.triesLeft + ' tries left)' : '') + (j.retryMin ? ' (locked ' + j.retryMin + ' min)' : '')); return j; }); });
+  }
+  $('add').onclick = function () {
+    var m = $('msg'); m.className = 'msg mut'; m.textContent = 'saving…';
+    post({ action: 'add', trade: form() }).then(function () { m.className = 'msg up'; m.textContent = 'saved'; ['fCoin', 'fEntry', 'fExit', 'fQty', 'fFees', 'fFund', 'fNote'].forEach(function (i) { $(i).value = ''; }); $('fAt').value = nowLocal(); preview(); load(); }).catch(function (e) { m.className = 'msg dn'; m.textContent = e.message; });
+  };
+  function del(id) { if (!confirm('Delete this trade?')) return; post({ action: 'del', id: String(id) }).then(load).catch(function (e) { alert(e.message); }); }
+  function load() {
+    return fetch(URL_ + 'desk_events?select=id,ts,data&kind=eq.mytrade&order=ts.asc&limit=2000', { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (rows) { T = rows.map(function (r) { var d = r.data || {}; d.id = r.id; d.t = Date.parse(d.at); return d; }).filter(function (d) { return isFinite(d.t); }).sort(function (a, b) { return a.t - b.t; }); render(); })
+      .catch(function (e) { $('kpis').innerHTML = '<span class="dn">Could not load trades: ' + esc(e.message) + '</span>'; });
+  }
+  function render() {
+    var start = +$('start').value || 350, goal = (+$('goal').value || 0) / 100;
+    var tot = 0, wins = T.filter(function (t) { return +t.pnl > 0; }), losses = T.filter(function (t) { return +t.pnl <= 0; });
+    T.forEach(function (t) { tot += +t.pnl; });
+    var days = {}, order = []; T.forEach(function (t) { var k = bkkDay(t.t); if (!days[k]) { days[k] = []; order.push(k); } days[k].push(t); });
+    var bal = start, rowsD = '', hit = 0, today = bkkDay(Date.now()), todayP = 0, todayStart = start;
+    order.forEach(function (k) { var p = days[k].reduce(function (s, t) { return s + +t.pnl; }, 0), pct = p / bal * 100, ok = pct >= goal * 100; if (k === today) { todayP = p; todayStart = bal; } if (ok) hit++; rowsD += '<tr><td>' + k + '</td><td class="num">' + days[k].length + '</td><td class="num">' + days[k].filter(function (t) { return +t.pnl > 0; }).length + '</td><td class="num ' + cls(p) + '">' + money(p) + '</td><td class="num ' + cls(pct) + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%</td><td>' + (ok ? '<span class="up">goal hit</span>' : '<span class="mut">below goal</span>') + '</td><td class="num">$' + (bal + p).toFixed(2) + '</td></tr>'; bal += p; });
+    if (!days[today]) todayStart = bal;
+    var avg = function (a) { return a.length ? a.reduce(function (s, t) { return s + +t.pnl; }, 0) / a.length : 0; };
+    var need = todayStart * goal;
+    $('kpis').innerHTML = [
+      ['Balance', '$' + (start + tot).toFixed(2), '<span class="' + cls(tot) + '">' + money(tot) + '</span> since start ($' + start.toFixed(0) + ')'],
+      ['Today', '<span class="' + cls(todayP) + '">' + money(todayP) + '</span>', 'goal ' + money(need) + ' (' + (goal * 100).toFixed(0) + '%)' + (todayP >= need && need > 0 ? ' <span class="up">hit</span>' : '')],
+      ['Win rate', T.length ? Math.round(wins.length / T.length * 100) + '%' : '–', wins.length + ' wins / ' + losses.length + ' losses'],
+      ['Avg win / loss', T.length ? '<span class="up">' + money(avg(wins)) + '</span> / <span class="dn">' + money(avg(losses)) + '</span>' : '–', 'per trade'],
+      ['Goal days', order.length ? hit + ' of ' + order.length : '–', 'days at ' + (goal * 100).toFixed(0) + '% or more'],
+      ['Fees + funding', T.length ? money(-T.reduce(function (s, t) { return s + (+t.fees || 0); }, 0)) + ' / ' + money(T.reduce(function (s, t) { return s + (+t.funding || 0); }, 0)) : '–', 'paid / received']
+    ].map(function (k) { return '<div class="kpi"><div class="l">' + k[0] + '</div><div class="v">' + k[1] + '</div><div class="s">' + k[2] + '</div></div>'; }).join('');
+    $('days').innerHTML = '<table><tr><th>Day</th><th class="num">Trades</th><th class="num">Wins</th><th class="num">P&amp;L</th><th class="num">Day %</th><th>Goal</th><th class="num">Balance</th></tr>' + (rowsD || '<tr><td colspan="7" class="mut">No trades yet.</td></tr>') + '</table>';
+    $('list').innerHTML = '<table><tr><th>Closed</th><th>Coin</th><th>Side</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Qty</th><th class="num">Lev</th><th class="num">Fees</th><th class="num">Funding</th><th class="num">Net P&amp;L</th><th>Note</th><th></th></tr>' + (T.length ? T.slice().reverse().map(function (t) {
+      return '<tr><td>' + bkk(t.t) + '</td><td><b>' + esc(t.coin) + '</b> <span class="mut">' + esc(t.exchange) + '</span></td><td class="' + (t.side === 'LONG' ? 'up' : 'dn') + '">' + esc(t.side) + '</td><td class="num">' + (+t.entry) + '</td><td class="num">' + (+t.exit) + '</td><td class="num">' + (+t.qty) + '</td><td class="num">' + (+t.lev) + 'x</td><td class="num">$' + (+t.fees || 0).toFixed(2) + '</td><td class="num ' + cls(+t.funding || 0) + '">' + money(+t.funding || 0) + '</td><td class="num ' + cls(+t.pnl) + '"><b>' + money(+t.pnl) + '</b></td><td class="mut" style="white-space:normal;min-width:160px">' + esc(t.note) + '</td><td><button class="x" data-id="' + esc(t.id) + '" title="Delete">×</button></td></tr>';
+    }).join('') : '<tr><td colspan="12" class="mut">No trades yet. Add your first one above.</td></tr>') + '</table>';
+    Array.prototype.forEach.call(document.querySelectorAll('button.x'), function (b) { b.onclick = function () { del(b.getAttribute('data-id')); }; });
+    chart(start, goal, order, days);
+  }
+  function chart(start, goal, order, days) {
+    if (!order.length) { $('chart').innerHTML = '<span class="mut">No trades yet. Your balance line and the goal line appear here.</span>'; return; }
+    var W = 640, H = 220, P = 36, pts = [{ d: 0, v: start }], bal = start;
+    order.forEach(function (k, i) { bal += days[k].reduce(function (s, t) { return s + +t.pnl; }, 0); pts.push({ d: i + 1, v: bal }); });
+    var n = Math.max(order.length, 7), gl = []; for (var i = 0; i <= n; i++) gl.push({ d: i, v: start * Math.pow(1 + goal, i) });
+    var vals = pts.map(function (p) { return p.v; }).concat(gl.map(function (p) { return p.v; })), lo = Math.min.apply(null, vals) * 0.95, hi = Math.max.apply(null, vals) * 1.05;
+    var x = function (d) { return P + (d / n) * (W - P - 10); }, y = function (v) { return H - 24 - (v - lo) / (hi - lo) * (H - 40); };
+    var path = function (a) { return a.map(function (p, i) { return (i ? 'L' : 'M') + x(p.d).toFixed(1) + ' ' + y(p.v).toFixed(1); }).join(' '); };
+    $('chart').innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Balance versus goal">' +
+      '<line x1="' + P + '" x2="' + (W - 10) + '" y1="' + y(start) + '" y2="' + y(start) + '" stroke="currentColor" stroke-opacity=".15"/>' +
+      '<path d="' + path(gl) + '" fill="none" stroke="var(--gold)" stroke-width="2" stroke-dasharray="5 4"/>' +
+      '<path d="' + path(pts) + '" fill="none" stroke="var(--acc)" stroke-width="2.5"/>' +
+      pts.map(function (p) { return '<circle cx="' + x(p.d) + '" cy="' + y(p.v) + '" r="3" fill="var(--acc)"/>'; }).join('') +
+      '<text x="' + P + '" y="' + (H - 6) + '">day 0</text><text x="' + (W - 10) + '" y="' + (H - 6) + '" text-anchor="end">day ' + n + '</text>' +
+      '<text x="4" y="' + (y(start) + 4) + '">$' + start.toFixed(0) + '</text>' +
+      '<text x="' + (x(n) - 4) + '" y="' + (y(gl[n].v) - 6) + '" text-anchor="end" style="fill:var(--gold)">goal $' + gl[n].v.toFixed(0) + '</text>' +
+      '<text x="' + (x(pts[pts.length - 1].d) + 6) + '" y="' + (y(pts[pts.length - 1].v) + 4) + '" style="fill:var(--acc)">you $' + pts[pts.length - 1].v.toFixed(0) + '</text></svg>';
+  }
+  load();
+})();
+</script>
+</body>
+</html>
