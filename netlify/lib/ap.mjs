@@ -235,7 +235,7 @@ export const spotFees = (p, endMs) => +p.notional * SPOT.fee * 2 + (/:spm$/.test
 export const closePos = async (db, p, exit, why) => {
   const dir = p.side === 'LONG' ? 1 : -1;
   const funding = perpFunded(p.coin) && p.opened_at ? await rev3Funding(p).catch(() => 0) : 0;
-  const fees = /:sp[lm]$/.test(p.coin) ? spotFees(p, Date.now()) : /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - RM * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + (String(why) === 'time exit' ? MAKER_FEE : FEE)) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
+  const fees = /:sp[lm]$/.test(p.coin) ? spotFees(p, Date.now()) : /:fdt$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why) === 'time exit' ? MAKER_FEE : FEE)) : /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - RM * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + (String(why) === 'time exit' ? MAKER_FEE : FEE)) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
   await db.update('ap_positions', 'id=eq.' + p.id, { status: 'closed', exit_price: exit, closed_at: new Date().toISOString(), pnl, fees, close_reason: funding ? why + ' | funding ' + (funding >= 0 ? '+' : '') + funding.toFixed(2) : why });
   return pnl;
 };

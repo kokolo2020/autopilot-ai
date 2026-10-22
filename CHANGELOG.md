@@ -76,6 +76,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.58
+- Lab: Residual momentum reversed desk; Funding-time drift booked at limit-order fees; backtest results in the test notes
+
 ## v1.57
 - AI signals: wider TP/SL bands + 15m/1h context; new desk Trend momentum vs BTC (only coins beating BTC over 30 days)
 

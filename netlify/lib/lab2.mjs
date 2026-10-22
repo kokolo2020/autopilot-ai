@@ -98,21 +98,28 @@ export function residualScores(series, btc) {
   const sum = e.slice(0, RMOM.look - 1).reduce((x, y) => x + y, 0);
   return { beta, score: sum / (sd * Math.sqrt(RMOM.look - 1)) };
 }
-export async function rmomTick(db, live, tk, ctl, now, out) {
-  const since = now - boundaryAt(now); if (since < 30 * 60000 || since >= 40 * 60000 || ctlBlocks(ctl, 'rmom', '') || live.length) return;
-  const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*:rmom&order=opened_at.desc&limit=1').catch(() => []))[0];
+/* :rmomr (v1.58) is the same desk pointed the other way: long the 4 weakest residual scores, short the 4 strongest. A one-year backtest (Oct 2025-Oct 2026, weekly,
+   taker fees) had the original direction at -$630 and the reversed one at +$402; neither is statistically solid, so both run side by side on paper. */
+let RMOM_CACHE = null;
+export async function rmomTick(db, live, tk, ctl, now, out, suf = 'rmom', rev = false) {
+  const since = now - boundaryAt(now); if (since < 30 * 60000 || since >= 40 * 60000 || ctlBlocks(ctl, suf, '') || live.length) return;
+  const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*:' + suf + '&order=opened_at.desc&limit=1').catch(() => []))[0];
   if (!batchDue(last, now, RMOM.holdDays)) return;
+  let sc;
+  if (RMOM_CACHE && RMOM_CACHE.day === boundaryAt(now)) sc = RMOM_CACHE.sc.slice(); else {
   const btc = await dailyCloses('BTC-USDT', RMOM.betaDays + 2);
   const uni = [...REV_UNI].filter((c) => c !== 'BTC' && !STABLE.has(c) && tk[c + '-USDT-SWAP'] && +tk[c + '-USDT-SWAP'].volCcy24h * +tk[c + '-USDT-SWAP'].last >= RMOM.minVol && !(ctl && ctl.coinsOff && ctl.coinsOff[c]));
-  const sc = [];
+  sc = [];
   for (let i = 0; i < uni.length; i += 10) { await Promise.all(uni.slice(i, i + 10).map(async (c) => { try { const s = residualScores(await dailyCloses(c + '-USDT', RMOM.betaDays + 2), btc); if (s) sc.push(Object.assign({ c, px: +tk[c + '-USDT-SWAP'].last }, s)); } catch (e) {} })); await sleep(400); }
-  if (sc.length < 2 * RMOM.k + 4) { out.push('rmom: only ' + sc.length + ' coins scored'); return; }
+  RMOM_CACHE = { day: boundaryAt(now), sc: sc.slice() };
+  }
+  if (sc.length < 2 * RMOM.k + 4) { out.push(suf + ': only ' + sc.length + ' coins scored'); return; }
   sc.sort((a, b) => b.score - a.score);
-  const until = nextClose(now, RMOM.holdDays), longs = sc.slice(0, RMOM.k), shorts = sc.slice(-RMOM.k);
+  const until = nextClose(now, RMOM.holdDays), top = sc.slice(0, RMOM.k), bottom = sc.slice(-RMOM.k), longs = rev ? bottom : top, shorts = rev ? top : bottom;
   let net = 0;
-  for (const [g, dir] of [[longs, 1], [shorts, -1]]) for (const x of g) { await open(db, x.c, 'rmom', dir, x.px, RMOM.leg, x.px * (dir > 0 ? 100 : 0.01), x.px * (1 - dir * RMOM.stop), until); net += dir * x.beta * RMOM.leg; out.push('rmom ' + (dir > 0 ? 'LONG ' : 'SHORT ') + x.c + ' (residual score ' + x.score.toFixed(2) + ', beta ' + x.beta.toFixed(2) + ')'); }
+  for (const [g, dir] of [[longs, 1], [shorts, -1]]) for (const x of g) { await open(db, x.c, suf, dir, x.px, RMOM.leg, x.px * (dir > 0 ? 100 : 0.01), x.px * (1 - dir * RMOM.stop), until); net += dir * x.beta * RMOM.leg; out.push(suf + ' ' + (dir > 0 ? 'LONG ' : 'SHORT ') + x.c + ' (residual score ' + x.score.toFixed(2) + ', beta ' + x.beta.toFixed(2) + ')'); }
   const h = Math.min(Math.abs(net), RMOM.hedgeMax), bt = tk['BTC-USDT-SWAP'];
-  if (h >= RMOM.minHedge && bt) { const dir = net > 0 ? -1 : 1, px = +bt.last; await open(db, 'BTC', 'rmom', dir, px, +h.toFixed(2), px * (dir > 0 ? 100 : 0.01), px * (1 - dir * RMOM.stop), until); out.push('rmom BTC hedge ' + (dir > 0 ? 'LONG' : 'SHORT') + ' $' + h.toFixed(0)); }
+  if (h >= RMOM.minHedge && bt) { const dir = net > 0 ? -1 : 1, px = +bt.last; await open(db, 'BTC', suf, dir, px, +h.toFixed(2), px * (dir > 0 ? 100 : 0.01), px * (1 - dir * RMOM.stop), until); out.push(suf + ' BTC hedge ' + (dir > 0 ? 'LONG' : 'SHORT') + ' $' + h.toFixed(0)); }
 }
 
 /* ---------- :pair pairs ---------- */
@@ -187,16 +194,17 @@ export async function lab2Tick(env, now = Date.now()) {
   const db = sb(env.SUPABASE_SERVICE_KEY), out = [];
   const ctl = await loadControl(db); ctl.auto = await autoPaused(db, ctl.lossLimit).catch(() => ({}));
   const tk = {}; for (const t of await okx('/api/v5/market/tickers?instType=SWAP')) tk[t.instId] = t;
-  const all = await db.select('ap_positions', 'select=*&status=eq.open&or=(coin.like.*:fdt,coin.like.*:lsr,coin.like.*:rmom,coin.like.*:pair,coin.like.*:fspo,coin.like.*:fsph)');
-  const gone = await manageAll(db, all.filter((p) => /:(fdt|lsr|rmom)$/.test(p.coin)), tk, out);
+  const all = await db.select('ap_positions', 'select=*&status=eq.open&or=(coin.like.*:fdt,coin.like.*:lsr,coin.like.*:rmom,coin.like.*:rmomr,coin.like.*:pair,coin.like.*:fspo,coin.like.*:fsph)');
+  const gone = await manageAll(db, all.filter((p) => /:(fdt|lsr|rmom|rmomr)$/.test(p.coin)), tk, out);
   const live = (suf) => all.filter((p) => p.coin.endsWith(':' + suf) && !gone.has(p.id));
   const run = async (name, f) => { try { await f(); } catch (e) { out.push(name + ' error ' + String(e.message || e).slice(0, 100)); } };
   await run('fdt', () => fdtTick(db, live('fdt'), tk, ctl, now, out));
   await run('lsr', () => lsrTick(db, live('lsr'), tk, ctl, now, out));
   await run('rmom', () => rmomTick(db, live('rmom'), tk, ctl, now, out));
+  await run('rmomr', () => rmomTick(db, live('rmomr'), tk, ctl, now, out, 'rmomr', true));
   await run('pair', () => pairTick(db, live('pair'), tk, ctl, now, out));
   await run('fsp', () => fspTick(db, all.filter((p) => /:fsp[oh]$/.test(p.coin)), tk, ctl, now, out));
   const mn = new Date(now).getUTCMinutes(), worth = out.some((x) => /opened|closed|converged|stop|limit|error|LONG|SHORT/.test(x)) || (mn >= 10 && mn < 15);
-  if (out.length && worth) await db.insert('ap_decisions', { coin: 'Lab desks', action: 'PASS', confidence: 0, reason: out.join(' · ').slice(0, 340), price: 0, taken: out.some((x) => / opened |^(fdt|lsr|rmom) (LONG|SHORT)/.test(x)) }).catch(() => null); // visible log on the research page
+  if (out.length && worth) await db.insert('ap_decisions', { coin: 'Lab desks', action: 'PASS', confidence: 0, reason: out.join(' · ').slice(0, 340), price: 0, taken: out.some((x) => / opened |^(fdt|lsr|rmom|rmomr) (LONG|SHORT)/.test(x)) }).catch(() => null); // visible log on the research page
   return { at: new Date(now).toISOString(), open: all.length, out };
 }
