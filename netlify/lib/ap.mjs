@@ -1068,6 +1068,7 @@ export async function sigTick(db, rows, openPos, ctl, env, now = Date.now()) {
   const prompt = 'You are a high-frequency crypto scanner.\n\nRULES:\n- TP distance must be between 0.4% and 0.7% from entry\n- SL distance must be between 0.2% and 0.4% from entry\n- TP must be at least 1.5x SL distance\n- Leverage: max 3x\n- Max 3 setups per run\n- Confidence 5 or higher\n- Both LONG and SHORT allowed\n- Match direction to short-term momentum\n- Skip extremely volatile (24h move above 6%)\n\nOUTPUT: JSON array only.\nFormat: [{"symbol":"BTCUSDT","direction":"LONG","entry":78000,"sl":77766,"tp":78390,"leverage":3,"confidence":6,"reason":"brief"}]\n\nIf nothing qualifies: []\n\nData:\n' + msg;
   let arr = [];
   try { const text = await claude(env.ANTHROPIC_API_KEY, { max_tokens: 800, messages: [{ role: 'user', content: prompt }] }); const a = text.indexOf('['), b = text.lastIndexOf(']'); if (a >= 0 && b > a) arr = JSON.parse(text.slice(a, b + 1)); } catch (e) { out.push('sig claude error ' + String(e.message).replace(/\s+/g, ' ').slice(0, 260)); return out; }
+  out.push('sig asked Claude: ' + (Array.isArray(arr) ? arr.length : 0) + ' setup(s) returned'); // so a quiet run shows in the log
   for (const s of (Array.isArray(arr) ? arr : []).slice(0, 3)) {
     const coin = String(s.symbol || '').replace(/USDT$/, '').toUpperCase(), v = sigValid(s), r = rows.find((x) => x.coin === coin);
     if (!SIG.coins.includes(coin)) continue;

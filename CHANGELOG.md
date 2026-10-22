@@ -69,6 +69,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.54.1
+- AI signals logs how many setups Claude returned each run
+
 ## v1.54
 - Scalp lab: momentum vs random quick trades in four TP/SL sizes, break-even win rates vs taker and maker fees; tick answers the scheduler at once (no more duplicate runs)
 
