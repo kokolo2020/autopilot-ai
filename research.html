@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="version" content="ap-v1.53.1">
+<meta name="version" content="ap-v1.53.2">
 <title>Autopilot</title>
 <style>
   :root { --bg:#0b0f14; --card:#121922; --card2:#0f151d; --line:#1f2a37; --text:#e6edf3; --mut:#8b98a8; --up:#3ddc97; --down:#ff6b6b; --acc:#6aa9ff; --warn:#f2c14e; --s1:#3987e5; --s2:#d95926; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
@@ -49,7 +49,7 @@
 <style>.v2row td:first-child{box-shadow:inset 4px 0 #8b5cf6}tr.v2row td:first-child{box-shadow:inset 4px 0 #8b5cf6!important}.v2row td{background:rgba(139,92,246,.10)}.v2b{background:#8b5cf6;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;vertical-align:middle}.retrow td{opacity:.6}tr.retrow td:first-child{box-shadow:inset 4px 0 #8b98a8!important}.retb{background:#8b98a8;color:#111;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;vertical-align:middle}tr.grp td{background:transparent!important;box-shadow:none!important;padding-top:14px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid var(--line)}tr.gnew td b{color:#8b5cf6}tr.gret td b{color:var(--mut)}.newrow td{background:rgba(245,166,35,.18)}.pos td{background:rgba(61,220,151,.14)!important}.pos td:first-child{box-shadow:inset 4px 0 var(--up)!important}.newrow td:first-child{box-shadow:inset 4px 0 #f5a623}.newb{background:#f5a623;color:#111;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle}</style></head>
 <body>
 <div class="wrap">
-  <h1>AUTOPILOT <small><span id="ver">ap-v1.53.1</span> · top 50 coins · paper money · decided by Claude · runs on the server</small></h1>
+  <h1>AUTOPILOT <small><span id="ver">ap-v1.53.2</span> · top 50 coins · paper money · decided by Claude · runs on the server</small></h1>
   <div class="sub" id="status">loading…</div>
   <div class="kpis" id="kpis"></div>
   <div class="card" id="cmp" style="margin-bottom:10px"></div>
@@ -155,7 +155,7 @@ var y2a = stats(PS().filter(function (p) { return /:revm$/.test(p.coin); })), y2
     rowsH = rowsH.split('<tr').filter(function (r) { return /<b>(Neutral Rev|Neutral Rev 2|Neutral Rev 2 limit|Rev 3 daily|Capitulation Rev|Reverse extremes|Rev 2 \+ winner exit|Neutral Rev scale-out|Neutral Rev weekly|Rev 3 low-leverage|Spot long-only|Spot margin Rev|AI signals \(paper\)|Trend momentum|Trend hold|Crash buyer)<\/b>/.test(r); }).map(function (r) { return '<tr' + r; });
     /* groups: new desks (22 Oct), the active 30-day test desks, and the desks retired on 21 Oct (kept for comparison) */
     var nameOf = function (r) { var m = /<b>([^<]+)<\/b>/.exec(r); return m ? m[1] : ''; };
-    var G_NEW = ['Trend hold', 'Crash buyer', 'Trend momentum'], G_RET = ['Neutral Rev 2', 'Rev 2 + winner exit', 'Neutral Rev scale-out', 'Reverse extremes', 'Spot long-only', 'Spot margin Rev', 'Rev 3 daily'];
+    var G_NEW = ['Trend hold', 'Crash buyer', 'Trend momentum'], G_RET = ['Neutral Rev 2', 'Neutral Rev scale-out', 'Reverse extremes', 'Spot margin Rev', 'Rev 3 daily'];
     var grp = function (title, sub, cls) { return '<tr class="grp ' + cls + '"><td colspan="8"><b>' + title + '</b> <span class="mut">' + sub + '</span></td></tr>'; };
     var gNew = rowsH.filter(function (r) { return G_NEW.indexOf(nameOf(r)) >= 0; }).map(function (r) { return r.replace('class="newrow"', 'class="v2row"').replace('<span class="newb">NEW</span>', '<span class="v2b">NEW</span>').replace(/^<tr>/, '<tr class="v2row">'); });
     var gRet = rowsH.filter(function (r) { return G_RET.indexOf(nameOf(r)) >= 0; }).map(function (r) { return r.replace('class="newrow"', 'class="retrow"').replace('<span class="newb">NEW</span>', '<span class="retb">RETIRED 21 OCT</span>').replace(/^<tr>/, '<tr class="retrow">'); });

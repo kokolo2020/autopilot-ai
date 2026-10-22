@@ -13,7 +13,7 @@ export const RM = 100, REV_MIN_VOL = 10e6;
 export const revOk = (r) => REV_UNI.has(r.coin) && (r.vol_usd == null || r.vol_usd >= REV_MIN_VOL);
 export const RETIRED = new Set(['ai', 'n', 's', 'u', 'm', 'g', 'algo', 'algo2', 'algo3', 'algoq', 'algow', 'algox', 'algot', 'algo3b', 'algo100', 'rev100', 'flip', 'revv', 'r3w', 'r3m', 'r3y',
   /* retired 21 Oct 2026 (Koko: trim to the desks worth a full 30 days): no new batches or resets; legs already open run to their normal close */
-  'revs', 'rev2', 'rev2s', 'revx', 'spl', 'spm', 'r3d']);
+  'revs', 'rev2', 'revx', 'spm', 'r3d']); // rev2s and spl back on 22 Oct (in profit, Koko's call)
 export const MAX_SPREAD_BPS = 12;
 /* Four AI desks read the SAME Claude decision and differ only in how easily they act on it. Each has its own $250 per coin.
    Normal ':n', Aggressive '' (the original desk), Super ':s', Ultra ':u'. picks = how many of the biggest movers it may trade. */

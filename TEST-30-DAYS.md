@@ -61,3 +61,5 @@ My picks add-on: once a coin trades 18% below its first entry, add $100 margin a
 My picks ladder: the add-on repeats each time a coin is another 18% below its latest entry, up to 4 add-ons per coin.
 
 > **22 Oct 2026 (v1.53): two new desks, old ones kept for comparison.** Trend hold (BTC/ETH/SOL at 2x, each held only above its own 100-day average) and Crash buyer (cash unless the market falls 3%+ in 24h, then the 5 weakest for 3 days). Trend momentum now only buys coins that are up over 30 days. Funding carry: no slot has qualified since the reset (top-coin funding is below its 0.03%/8h entry level), so it stays as is.
+
+> **22 Oct 2026 (v1.53.2): Rev 2 + winner exit and Spot long-only are back in the active group** (both in profit). Their first new batch opens on the next tick and closes at the 07:00 close.

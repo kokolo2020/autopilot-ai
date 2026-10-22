@@ -67,6 +67,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.53.2
+- Rev 2 + winner exit and Spot long-only reactivated (in profit) and moved to the active group
+
 ## v1.53.1
 - Research table grouped: New desks (purple), Active 30-day test desks, Retired 21 Oct (grey, kept for comparison)
 
