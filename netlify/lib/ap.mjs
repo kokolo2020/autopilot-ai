@@ -104,7 +104,7 @@ export function sb(key) {
 }
 
 /* ---------- Market data (OKX public API) ---------- */
-async function okx(path) {
+export async function okx(path) {
   const r = await fetch('https://www.okx.com' + path, { headers: { 'User-Agent': 'agent-desk-autopilot' } });
   if (!r.ok) throw new Error('okx ' + r.status);
   const j = await r.json();
@@ -221,7 +221,7 @@ export async function rev3Funding(p, endMs = Date.now()) {
   for (const x of await fundHist(sym, t0)) { const t = +x.fundingTime, rate = x.realizedRate != null && x.realizedRate !== '' ? +x.realizedRate : +x.fundingRate; if (t > t0 && t <= endMs && isFinite(rate)) sum -= dir * +p.notional * rate; }
   return sum;
 }
-export const perpFunded = (coin) => coin.includes(':') && !/:(sp[lm])$/.test(coin);
+export const perpFunded = (coin) => coin.includes(':') && !/:(sp[lm]|fsph)$/.test(coin); // :fsph is the Hyperliquid leg (its own funding, booked in lab2.mjs)
 /* warm the funding cache in parallel (8 at a time) for every perpetual leg that is due to close, so the 07:00 close does not fetch ~50 coins one by one */
 export async function prefetchFunding(rows, now = Date.now()) {
   const due = {}; for (const p of rows) if (perpFunded(p.coin) && p.opened_at && p.max_hold_until && new Date(p.max_hold_until).getTime() <= now + 60000) { const sym = p.coin.split(':')[0] + '-USDT-SWAP', t0 = new Date(p.opened_at).getTime(); due[sym] = Math.min(due[sym] ?? Infinity, t0); }
@@ -232,7 +232,7 @@ export async function prefetchFunding(rows, now = Date.now()) {
 /* Non-perpetual paper desks. Spot: taker 0.10% per side, no leverage, no funding. Spot margin short: the coin is borrowed, so the short leg also pays borrow interest (ASSUMED 0.03% per day; OKX's real rate varies by coin and day). Prices come from the perpetual mid, so the spot/perp basis is ignored. */
 export const SPOT = { fee: 0.001, borrowPerDay: 0.0003, longLeg: 200, pairLeg: 100 };
 export const spotFees = (p, endMs) => +p.notional * SPOT.fee * 2 + (/:spm$/.test(p.coin) && p.side === 'SHORT' ? +p.notional * SPOT.borrowPerDay * Math.max(0, (endMs - new Date(p.opened_at).getTime()) / 864e5) : 0);
-const closePos = async (db, p, exit, why) => {
+export const closePos = async (db, p, exit, why) => {
   const dir = p.side === 'LONG' ? 1 : -1;
   const funding = perpFunded(p.coin) && p.opened_at ? await rev3Funding(p).catch(() => 0) : 0;
   const fees = /:sp[lm]$/.test(p.coin) ? spotFees(p, Date.now()) : /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - RM * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + (String(why) === 'time exit' ? MAKER_FEE : FEE)) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
@@ -240,7 +240,7 @@ const closePos = async (db, p, exit, why) => {
   return pnl;
 };
 
-async function manageOpen(db, p, m) {
+export async function manageOpen(db, p, m) {
   const t0 = new Date(p.opened_at).getTime(), tp = +p.tp, sl = +p.sl;
   for (const k of m.candles.filter((x) => x.t >= t0 - 60000)) {
     const long = p.side === 'LONG';
@@ -947,7 +947,7 @@ export function sigValid(s) {
    ($400 position each, $2,000 in total on the $1,000 desk), held 7 days, then rebalanced. Each leg has a -20% price stop (well before liquidation at 2x).
    Every day after the 07:00 close: if BTC closes below its 200-day average, every trend leg is closed and the desk waits in cash. Taker fees and funding booked. Paper. */
 export const TREND = { k: 5, margin: 200, lev: 2, holdDays: 7, stop: 0.20, lookback: 30, sma: 200 };
-async function dailyCloses(inst, n) {
+export async function dailyCloses(inst, n) {
   let out = [], after = '';
   while (out.length < n) { const d = await okx('/api/v5/market/history-candles?instId=' + inst + '&bar=1Dutc&limit=100' + (after ? '&after=' + after : '')); if (!d || !d.length) break; out = out.concat(d.filter((k) => k[8] !== '0')); after = d[d.length - 1][0]; if (d.length < 100) break; }
   return out.slice(0, n).map((k) => +k[4]); // newest first, confirmed daily closes
@@ -1082,6 +1082,103 @@ export async function sigTick(db, rows, openPos, ctl, env, now = Date.now()) {
   return out;
 }
 
+/* ===== Lab desks, part 1 (from 22 Oct 2026): edge sources never tested before. Paper only, $100 margin x5 = $500 per trade, taker fees and funding booked.
+   These three need the 1-minute candles of the main scan, so they run inside the main tick. The rest (funding drift, crowd positioning, residual momentum,
+   pairs, OKX vs Hyperliquid funding) run in their own scheduled function, netlify/lib/lab2.mjs, so their extra API calls never slow this tick.
+   :liq  LIQUIDATION SNAPBACK - a coin moves 3%+ inside 15 minutes AND its open interest falls 2%+ over the same 15 minutes (forced closing, not new selling):
+         trade the snap back (long after a flush down, short after a squeeze up), take profit at half the move, stop the same distance, 2h limit.
+   :oif / :oir  OPEN-INTEREST CHECK - a coin moves 2%+ in 60 minutes. Open interest up 3%+ (new money joining) -> :oif follows the move (TP 2%, SL 1%).
+         Open interest down 3%+ (positions closing, the move is hollow) -> :oir fades it (TP 1.5%, SL 1%). 6h limit.
+   :lag  BTC LEAD-LAG - BTC moves 0.35%+ in 3 minutes; altcoins that normally follow BTC (beta from the last hour of 1-minute bars) but have not moved yet are
+         bought/sold in BTC's direction, take profit = the missing catch-up (min 0.25%), stop the same distance, 30 minute limit. */
+export const LAB_N = 500;
+export const LIQ = { move: 3, oiDrop: 2, cand: 3, holdMin: 120, cooldownMin: 60, maxOpen: 5 };
+export const OIB = { move: 2, oiUp: 3, oiDown: -3, cand: 3, follow: [2, 1], fade: [1.5, 1], holdH: 6, cooldownMin: 60 };
+export const LAG = { btcMove: 0.35, win: 3, minGap: 0.2, minBeta: 0.5, k: 3, holdMin: 30, cooldownMin: 10, minTp: 0.25 };
+export async function oiHist(inst, n) { const d = await okx('/api/v5/rubik/stat/contracts/open-interest-history?instId=' + inst + '&period=5m&limit=' + n); return d.map((k) => ({ t: +k[0], oi: +k[2] })).filter((x) => x.oi > 0).sort((a, b) => b.t - a.t); } // newest first, open interest in coins
+export const oiChange = (h, steps) => (h.length > steps ? (h[0].oi / h[steps].oi - 1) * 100 : null);
+async function labManage(db, rows, openPos, out) {
+  const gone = new Set();
+  for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (!r) continue; const t0 = new Date(p.opened_at).getTime(); const x = await manageOpen(db, p, Object.assign({}, r.m, { candles: r.m.candles.filter((k) => k.t >= t0) })).catch(() => null); if (x && x.closed) { gone.add(p.id); out.push(p.coin + ' ' + x.why.split(' ')[0] + ' ' + x.pnl.toFixed(2)); } }
+  return openPos.filter((p) => !gone.has(p.id));
+}
+const labOk = (r, ctl) => REV_UNI.has(r.coin) && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]);
+async function labRecent(db, suf, mins, now) { return (await db.select('ap_positions', 'select=coin&coin=like.*:' + suf + '&opened_at=gte.' + new Date(now - mins * 60000).toISOString()).catch(() => [])).map((x) => x.coin); }
+async function labOpen(db, coin, suf, dir, px, tpPct, slPct, holdMs, now) {
+  const d = decFor(px) + 2;
+  await db.insert('ap_positions', { coin: coin + ':' + suf, side: dir > 0 ? 'LONG' : 'SHORT', entry_price: px, size: LAB_N / px, notional: LAB_N, tp: +(px * (1 + dir * tpPct / 100)).toFixed(d), sl: +(px * (1 - dir * slPct / 100)).toFixed(d), max_hold_until: new Date(now + holdMs).toISOString() });
+}
+export async function liqTick(db, rows, openPos, ctl, now = Date.now()) {
+  const out = [], live = await labManage(db, rows, openPos, out);
+  if (ctlBlocks(ctl, 'liq', '') || live.length >= LIQ.maxOpen) return out;
+  const busy = new Set(live.map((p) => p.coin).concat(await labRecent(db, 'liq', LIQ.cooldownMin, now)));
+  const c = rows.filter((r) => labOk(r, ctl) && !busy.has(r.coin + ':liq') && r.m.candles.length >= 16).map((r) => {
+    const k = r.m.candles.slice(-16), hi = Math.max(...k.map((x) => x.h)), lo = Math.min(...k.map((x) => x.l)), p = r.m.price, dn = (p / hi - 1) * 100, up = (p / lo - 1) * 100;
+    return { r, mv: -dn >= up ? dn : up };
+  }).filter((x) => Math.abs(x.mv) >= LIQ.move).sort((a, b) => Math.abs(b.mv) - Math.abs(a.mv)).slice(0, LIQ.cand);
+  for (const { r, mv } of c) {
+    if (live.length + out.filter((x) => / opened /.test(x)).length >= LIQ.maxOpen) break;
+    let d; try { d = oiChange(await oiHist(COINS[r.coin] ? COINS[r.coin].inst : r.coin + '-USDT-SWAP', 5), 3); } catch (e) { continue; }
+    if (d == null) continue;
+    if (d > -LIQ.oiDrop) { out.push('liq skip ' + r.coin + ' move ' + mv.toFixed(1) + '%, open interest ' + d.toFixed(1) + '% (no flush)'); continue; }
+    const dir = mv < 0 ? 1 : -1, half = Math.abs(mv) / 2;
+    await labOpen(db, r.coin, 'liq', dir, r.m.price, half, half, LIQ.holdMin * 60000, now);
+    out.push('liq opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + r.coin + ' after ' + mv.toFixed(1) + '% in 15m, open interest ' + d.toFixed(1) + '%');
+  }
+  return out;
+}
+export async function oibTick(db, rows, openF, openR, ctl, now = Date.now()) {
+  const out = [], liveF = await labManage(db, rows, openF, out), liveR = await labManage(db, rows, openR, out);
+  if (ctlBlocks(ctl, 'oib', '')) return out;
+  const busy = new Set(liveF.concat(liveR).map((p) => p.coin.split(':')[0]).concat((await labRecent(db, 'oif', OIB.cooldownMin, now)).concat(await labRecent(db, 'oir', OIB.cooldownMin, now)).map((c) => c.split(':')[0])));
+  const c = rows.filter((r) => labOk(r, ctl) && !busy.has(r.coin) && Math.abs(r.F.ret_60m) >= OIB.move).sort((a, b) => Math.abs(b.F.ret_60m) - Math.abs(a.F.ret_60m)).slice(0, OIB.cand);
+  for (const r of c) {
+    let d; try { d = oiChange(await oiHist(COINS[r.coin] ? COINS[r.coin].inst : r.coin + '-USDT-SWAP', 13), 12); } catch (e) { continue; }
+    if (d == null) continue;
+    const mvDir = r.F.ret_60m > 0 ? 1 : -1;
+    if (d >= OIB.oiUp) { await labOpen(db, r.coin, 'oif', mvDir, r.m.price, OIB.follow[0], OIB.follow[1], OIB.holdH * 3600e3, now); out.push('oif FOLLOW ' + (mvDir > 0 ? 'LONG ' : 'SHORT ') + r.coin + ' (60m ' + r.F.ret_60m.toFixed(1) + '%, open interest +' + d.toFixed(1) + '%)'); }
+    else if (d <= OIB.oiDown) { await labOpen(db, r.coin, 'oir', -mvDir, r.m.price, OIB.fade[0], OIB.fade[1], OIB.holdH * 3600e3, now); out.push('oir FADE ' + (mvDir > 0 ? 'SHORT ' : 'LONG ') + r.coin + ' (60m ' + r.F.ret_60m.toFixed(1) + '%, open interest ' + d.toFixed(1) + '%)'); }
+    else out.push('oi skip ' + r.coin + ' (60m ' + r.F.ret_60m.toFixed(1) + '%, open interest ' + d.toFixed(1) + '%)');
+  }
+  return out;
+}
+export function lagSignals(rows, btcRow) {
+  const B = btcRow.m.candles, n = B.length; if (n < 70) return { bm: 0, picks: [] };
+  const t1 = B[n - 1].t, t0 = B[n - 1 - LAG.win].t, bm = (B[n - 1].c / B[n - 1 - LAG.win].c - 1) * 100;
+  const bRet = {}; for (let i = 1; i < n - 1 - LAG.win; i++) bRet[B[i].t] = B[i].c / B[i - 1].c - 1; // history before the move
+  const picks = [];
+  for (const r of rows) {
+    if (r.coin === 'BTC') continue;
+    const A = r.m.candles, byT = {}; for (const k of A) byT[k.t] = k;
+    const xs = [], ys = []; for (let i = 1; i < A.length; i++) { const b = bRet[A[i].t]; if (b != null && byT[A[i].t - 60000]) { xs.push(b); ys.push(A[i].c / byT[A[i].t - 60000].c - 1); } }
+    if (xs.length < 40 || !byT[t0] || !byT[t1]) continue;
+    const mx = xs.reduce((a, b) => a + b, 0) / xs.length, my = ys.reduce((a, b) => a + b, 0) / ys.length;
+    let cov = 0, vx = 0; for (let i = 0; i < xs.length; i++) { cov += (xs[i] - mx) * (ys[i] - my); vx += (xs[i] - mx) ** 2; }
+    if (!(vx > 0)) continue;
+    const beta = cov / vx, am = (byT[t1].c / byT[t0].c - 1) * 100, gap = beta * bm - am;
+    if (beta >= LAG.minBeta && Math.sign(bm) * gap >= LAG.minGap) picks.push({ r, beta, am, gap });
+  }
+  picks.sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
+  return { bm, picks };
+}
+export async function lagTick(db, rows, openPos, ctl, now = Date.now()) {
+  const out = [], live = await labManage(db, rows, openPos, out);
+  const btc = rows.find((r) => r.coin === 'BTC'); if (!btc || ctlBlocks(ctl, 'lag', '')) return out;
+  const B = btc.m.candles, n = B.length; if (n < 70) return out;
+  const bm = (B[n - 1].c / B[n - 1 - LAG.win].c - 1) * 100;
+  if (Math.abs(bm) < LAG.btcMove) return out;
+  if ((await labRecent(db, 'lag', LAG.cooldownMin, now)).length) return out;
+  const busy = new Set(live.map((p) => p.coin.split(':')[0]));
+  const sig = lagSignals(rows.filter((r) => labOk(r, ctl) && !busy.has(r.coin)), btc), dir = bm > 0 ? 1 : -1;
+  for (const x of sig.picks.slice(0, LAG.k)) {
+    const tp = Math.max(LAG.minTp, Math.abs(x.gap));
+    await labOpen(db, x.r.coin, 'lag', dir, x.r.m.price, tp, tp, LAG.holdMin * 60000, now);
+    out.push('lag opened ' + (dir > 0 ? 'LONG ' : 'SHORT ') + x.r.coin + ' (BTC ' + bm.toFixed(2) + '% in 3m, beta ' + x.beta.toFixed(2) + ', moved ' + x.am.toFixed(2) + '%, gap ' + x.gap.toFixed(2) + '%)');
+  }
+  if (!sig.picks.length) out.push('lag: BTC ' + bm.toFixed(2) + '% in 3m, no laggard');
+  return out;
+}
+
 export async function tickAll(env) {
   if (!env.SUPABASE_SERVICE_KEY || !env.ANTHROPIC_API_KEY) return [{ skipped: 'missing keys' }];
   const { rows, db } = await scanAll(env);
@@ -1121,6 +1218,9 @@ export async function tickAll(env) {
   const revwRes = await revVariantTick(db, rows, openRevw, ctl, 'revw').catch((e) => ['revw error ' + String(e.message || e).slice(0, 60)]);
   const rev2sRes = await rev2Tick(db, rows, openRev2s, ctl, 'rev2s').catch((e) => ['rev2s error ' + String(e.message || e).slice(0, 60)]);
   const scalpRes = await scalpTick(db, rows, openAll.filter((p) => /:s[kx][1-4]$/.test(p.coin)), ctl).catch((e) => ['scalp error ' + String(e.message || e).slice(0, 80)]);
+  const liqRes = await liqTick(db, rows, openAll.filter((p) => p.coin.endsWith(':liq')), ctl).catch((e) => ['liq error ' + String(e.message || e).slice(0, 80)]);
+  const oibRes = await oibTick(db, rows, openAll.filter((p) => p.coin.endsWith(':oif')), openAll.filter((p) => p.coin.endsWith(':oir')), ctl).catch((e) => ['oib error ' + String(e.message || e).slice(0, 80)]);
+  const lagRes = await lagTick(db, rows, openAll.filter((p) => p.coin.endsWith(':lag')), ctl).catch((e) => ['lag error ' + String(e.message || e).slice(0, 80)]);
   const tholdRes = await tholdTick(db, rows, openAll.filter((p) => p.coin.endsWith(':thold')), ctl).catch((e) => ['thold error ' + String(e.message || e).slice(0, 80)]);
   const crashRes = await crashTick(db, rows, openAll.filter((p) => p.coin.endsWith(':crash')), ctl).catch((e) => ['crash error ' + String(e.message || e).slice(0, 80)]);
   const trendRes = await trendTick(db, rows, openAll.filter((p) => p.coin.endsWith(':trend')), ctl).catch((e) => ['trend error ' + String(e.message || e).slice(0, 80)]);
@@ -1148,7 +1248,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, sig: sigRes, trend: trendRes, thold: tholdRes, crash: crashRes, scalp: scalpRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, sig: sigRes, trend: trendRes, thold: tholdRes, crash: crashRes, scalp: scalpRes, liq: liqRes, oib: oibRes, lag: lagRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */
