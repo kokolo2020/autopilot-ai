@@ -72,6 +72,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.55.1
+- Lab: hourly pairs z-score line in the decisions log
+
 ## v1.55
 - Lab desks: liquidation snapback, OI follow/fade, BTC lead-lag (main tick); funding-time drift, crowd vs top traders, residual momentum, pairs, OKX vs Hyperliquid funding spread (new lab2 function); teal Lab group on research
 

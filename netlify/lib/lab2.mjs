@@ -124,11 +124,13 @@ export function pairZ(ca, cb, pa, pb) {
 }
 export async function pairTick(db, legs, tk, ctl, now, out) {
   if (new Date(now).getUTCMinutes() < 10 || new Date(now).getUTCMinutes() >= 15) return; // hourly, at :10
+  const zs = [];
   for (const [A, B] of PAIR.pairs) {
     const ta = tk[A + '-USDT-SWAP'], tb = tk[B + '-USDT-SWAP']; if (!ta || !tb) continue;
     const pa = +ta.last, pb = +tb.last, mine = legs.filter((p) => p.coin === A + ':pair' || p.coin === B + ':pair');
     let z; try { z = pairZ(await dailyCloses(A + '-USDT', PAIR.look), await dailyCloses(B + '-USDT', PAIR.look), pa, pb); } catch (e) { continue; }
     if (z == null) continue;
+    zs.push(A + '/' + B + ' ' + z.toFixed(2));
     if (mine.length) {
       const la = mine.find((p) => p.coin === A + ':pair'), s = la && la.side === 'SHORT' ? 1 : -1, age = (now - new Date(mine[0].opened_at).getTime()) / 864e5;
       const why = s * z <= PAIR.zOut ? 'pair converged (z ' + z.toFixed(2) + ')' : s * z >= PAIR.zStop ? 'pair stop (z ' + z.toFixed(2) + ')' : age >= PAIR.maxDays ? 'pair time limit (z ' + z.toFixed(2) + ')' : null;
@@ -141,6 +143,7 @@ export async function pairTick(db, legs, tk, ctl, now, out) {
     await open(db, B, 'pair', s, pb, PAIR.leg, far(pb, s, decFor(pb) + 2).tp, far(pb, s, decFor(pb) + 2).sl, until);
     out.push('pair opened ' + (s > 0 ? 'SHORT ' + A + ' / LONG ' + B : 'LONG ' + A + ' / SHORT ' + B) + ' (z ' + z.toFixed(2) + ')');
   }
+  out.push('pairs z: ' + (zs.join(', ') || 'no data'));
 }
 
 /* ---------- :fspo / :fsph funding spread OKX vs Hyperliquid ---------- */
@@ -193,6 +196,7 @@ export async function lab2Tick(env, now = Date.now()) {
   await run('rmom', () => rmomTick(db, live('rmom'), tk, ctl, now, out));
   await run('pair', () => pairTick(db, live('pair'), tk, ctl, now, out));
   await run('fsp', () => fspTick(db, all.filter((p) => /:fsp[oh]$/.test(p.coin)), tk, ctl, now, out));
-  if (out.length) await db.insert('ap_decisions', { coin: 'Lab desks', action: 'PASS', confidence: 0, reason: out.join(' · ').slice(0, 340), price: 0, taken: out.some((x) => / opened |^(fdt|lsr|rmom) (LONG|SHORT)/.test(x)) }).catch(() => null); // visible log on the research page
+  const mn = new Date(now).getUTCMinutes(), worth = out.some((x) => /opened|closed|converged|stop|limit|error|LONG|SHORT/.test(x)) || (mn >= 10 && mn < 15);
+  if (out.length && worth) await db.insert('ap_decisions', { coin: 'Lab desks', action: 'PASS', confidence: 0, reason: out.join(' · ').slice(0, 340), price: 0, taken: out.some((x) => / opened |^(fdt|lsr|rmom) (LONG|SHORT)/.test(x)) }).catch(() => null); // visible log on the research page
   return { at: new Date(now).toISOString(), open: all.length, out };
 }
