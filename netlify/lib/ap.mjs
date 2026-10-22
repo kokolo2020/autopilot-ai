@@ -933,7 +933,8 @@ const shared0Breadth = (rows) => rows.filter((r) => r.F.ret_60m < 0).length / Ma
    and proposes up to 3 scalps with the old rules: SL 0.2-0.4% away, TP 0.4-0.7% away, TP at least 1.5x SL, leverage max 3x, skip coins that moved more than 6% in 24h.
    Each valid signal opens at the live price (the TP/SL distances are kept, re-based on the real entry), $100 margin x the signal's leverage, taker fees both ways,
    funding booked at close, stop checked before take profit inside the same minute (conservative), 24h time limit. One open signal per coin. Paper only: nothing is sent to an exchange. */
-export const SIG = { coins: ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'AVAX', 'DOGE', 'ARB'], margin: 100, maxLev: 3, slMin: 0.2, slMax: 0.4, tpMin: 0.4, tpMax: 0.7, rrMin: 1.5, holdH: 24, everyMin: 30 };
+export const SIG = { coins: ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'AVAX', 'DOGE', 'ARB'], margin: 100, maxLev: 3, slMin: 0.3, slMax: 1.0, tpMin: 0.5, tpMax: 2.0, rrMin: 1.5, // v1.57: widened from TP 0.4-0.7 / SL 0.2-0.4 (Claude returned no setups for a whole day under the old bands)
+  holdH: 24, everyMin: 30 };
 export function sigValid(s) {
   const e = +s.entry, sl = +s.sl, tp = +s.tp, dir = s.direction === 'LONG' ? 1 : s.direction === 'SHORT' ? -1 : 0;
   if (!dir || !(e > 0) || !(sl > 0) || !(tp > 0)) return null;
@@ -953,31 +954,33 @@ export async function dailyCloses(inst, n) {
   return out.slice(0, n).map((k) => +k[4]); // newest first, confirmed daily closes
 }
 export function trendRegime(btcCloses) { if (btcCloses.length < TREND.sma) return null; const sma = btcCloses.slice(0, TREND.sma).reduce((a, b) => a + b, 0) / TREND.sma; return { above: btcCloses[0] > sma, btc: btcCloses[0], sma }; }
-export async function trendTick(db, rows, openPos, ctl, now = Date.now()) {
+/* suf/rel/win: v1.57 adds :trendx (Trend momentum vs BTC): same rules, but a coin must beat BTC's own 30-day return to be bought (Koko 22 Oct: money is leaving altcoins for BTC). It decides 25-40 min after the close so it never shares a tick with :trend. */
+export async function trendTick(db, rows, openPos, ctl, now = Date.now(), suf = 'trend', rel = false, win = [10, 25]) {
   const out = [];
   for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' ' + x.why + ' ' + x.pnl.toFixed(2)); } }
-  const since = now - boundaryAt(now); if (since < 10 * 60000 || since > 25 * 60000) return out; // decide 10-25 minutes after the 07:00 close, away from the busy close tick
+  const since = now - boundaryAt(now); if (since < win[0] * 60000 || since > win[1] * 60000) return out; // decide 10-25 minutes after the 07:00 close, away from the busy close tick
   const reg = trendRegime(await dailyCloses('BTC-USDT', TREND.sma + 5));
   if (!reg) return out.concat(['trend: not enough BTC history']);
-  const still = (await db.select('ap_positions', 'select=*&status=eq.open&coin=like.*:trend').catch(() => openPos.filter((p) => p.status === 'open')));
+  const still = (await db.select('ap_positions', 'select=*&status=eq.open&coin=like.*:' + suf).catch(() => openPos.filter((p) => p.status === 'open')));
   if (!reg.above) {
     for (const p of still) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const v = await closePos(db, p, r.m.price, 'regime: BTC below 200-day average'); out.push(p.coin + ' closed (BTC below 200d) ' + v.toFixed(2)); } }
     return out.concat(['trend: cash, BTC ' + reg.btc.toFixed(0) + ' below 200-day average ' + reg.sma.toFixed(0)]);
   }
-  if (still.length || ctlBlocks(ctl, 'trend', '')) return out;
-  const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*:trend&order=opened_at.desc&limit=1').catch(() => []))[0];
+  if (still.length || ctlBlocks(ctl, suf, '')) return out;
+  const last = (await db.select('ap_positions', 'select=opened_at&coin=like.*:' + suf + '&order=opened_at.desc&limit=1').catch(() => []))[0];
   if (!batchDue(last, now, TREND.holdDays)) return out;
   const cand = rows.filter((r) => revOk(r) && !(ctl && ctl.coinsOff && ctl.coinsOff[r.coin]) && (r.spread_bps == null || r.spread_bps <= MAX_SPREAD_BPS));
   const ranked = [];
   for (let i = 0; i < cand.length; i += 10) await Promise.all(cand.slice(i, i + 10).map(async (r) => { try { const c = await dailyCloses(r.coin + '-USDT', TREND.lookback + 1); if (c.length > TREND.lookback) ranked.push({ r, ret: r.m.price / c[TREND.lookback - 1] - 1 }); } catch (e) {} }));
   ranked.sort((a, b) => b.ret - a.ret);
   const deadline = new Date(nextClose(now, TREND.holdDays)).toISOString();
-  const winners = ranked.filter((x) => x.ret > 0).slice(0, TREND.k); // v1.53: only coins that are actually up over 30 days; the rest of the money stays in cash
-  if (!winners.length) out.push('trend: no coin is up over 30 days, cash this week');
+  const btcRow = rows.find((x) => x.coin === 'BTC'), btcC = rel ? await dailyCloses('BTC-USDT', TREND.lookback + 1).catch(() => []) : [], bar = rel && btcRow && btcC.length >= TREND.lookback ? btcRow.m.price / btcC[TREND.lookback - 1] - 1 : 0;
+  const winners = ranked.filter((x) => x.ret > bar && x.ret > 0 && !(rel && x.r.coin === 'BTC')).slice(0, TREND.k); // v1.53: only coins that are actually up over 30 days; the rest of the money stays in cash
+  if (!winners.length) out.push(suf + ': no coin ' + (rel ? 'beats BTC (' + (bar * 100).toFixed(1) + '%) and is up' : 'is up') + ' over 30 days, cash this week');
   for (const { r, ret } of winners) {
     const px = r.m.price, d = decFor(px) + 2, notional = TREND.margin * TREND.lev;
-    await db.insert('ap_positions', { coin: r.coin + ':trend', side: 'LONG', entry_price: px, size: notional / px, notional, tp: +(px * 100).toFixed(d), sl: +(px * (1 - TREND.stop)).toFixed(d), max_hold_until: deadline });
-    out.push('trend opened LONG ' + r.coin + ' (30d ' + (ret * 100).toFixed(1) + '%)');
+    await db.insert('ap_positions', { coin: r.coin + ':' + suf, side: 'LONG', entry_price: px, size: notional / px, notional, tp: +(px * 100).toFixed(d), sl: +(px * (1 - TREND.stop)).toFixed(d), max_hold_until: deadline });
+    out.push(suf + ' opened LONG ' + r.coin + ' (30d ' + (ret * 100).toFixed(1) + '%' + (rel ? ', BTC ' + (bar * 100).toFixed(1) + '%' : '') + ')');
   }
   return out;
 }
@@ -1062,10 +1065,11 @@ export async function sigTick(db, rows, openPos, ctl, env, now = Date.now()) {
   for (const p of openPos) { const r = rows.find((x) => x.coin === p.coin.split(':')[0]); if (r) { const x = await manageOpen(db, p, r.m).catch(() => null); if (x && x.closed) out.push(p.coin + ' ' + x.why + ' ' + x.pnl.toFixed(2)); } }
   if (now % (SIG.everyMin * 60000) >= 5 * 60000 || ctlBlocks(ctl, 'sig', '') || !env.ANTHROPIC_API_KEY) return out; // one run per 30-minute window
   const tk = {}; for (const t of await okx('/api/v5/market/tickers?instType=SWAP')) tk[t.instId] = t;
-  let msg = 'Watchlist (24h stats)\n\n';
+  let msg = 'Watchlist (24h stats plus the last 15 minutes and 1 hour)\n\n';
   for (const c of SIG.coins) { const t = tk[c + '-USDT-SWAP']; if (!t) continue; const last = +t.last, o = +t.open24h, hi = +t.high24h, lo = +t.low24h;
-    msg += c + 'USDT\nPrice: $' + last + '\n24h: ' + ((last / o - 1) * 100).toFixed(2) + '%\n24h Range: ' + ((hi - lo) / lo * 100).toFixed(2) + '%\nVolume: $' + (+t.volCcy24h * last / 1e6).toFixed(0) + 'M\n\n'; }
-  const prompt = 'You are a high-frequency crypto scanner.\n\nRULES:\n- TP distance must be between 0.4% and 0.7% from entry\n- SL distance must be between 0.2% and 0.4% from entry\n- TP must be at least 1.5x SL distance\n- Leverage: max 3x\n- Max 3 setups per run\n- Confidence 5 or higher\n- Both LONG and SHORT allowed\n- Match direction to short-term momentum\n- Skip extremely volatile (24h move above 6%)\n\nOUTPUT: JSON array only.\nFormat: [{"symbol":"BTCUSDT","direction":"LONG","entry":78000,"sl":77766,"tp":78390,"leverage":3,"confidence":6,"reason":"brief"}]\n\nIf nothing qualifies: []\n\nData:\n' + msg;
+    const r = rows.find((x) => x.coin === c), mom = r && r.F ? '\n15m: ' + r.F.ret_15m.toFixed(2) + '%\n1h: ' + r.F.ret_60m.toFixed(2) + '%\nDistance below 1h high: ' + r.F.pullback_pct.toFixed(2) + '%\nDistance above 1h low: ' + r.F.bounce_pct.toFixed(2) + '%' : '';
+    msg += c + 'USDT\nPrice: $' + last + '\n24h: ' + ((last / o - 1) * 100).toFixed(2) + '%\n24h Range: ' + ((hi - lo) / lo * 100).toFixed(2) + '%' + mom + '\nVolume: $' + (+t.volCcy24h * last / 1e6).toFixed(0) + 'M\n\n'; }
+  const prompt = 'You are a high-frequency crypto scanner.\n\nRULES:\n- TP distance must be between 0.5% and 2% from entry\n- SL distance must be between 0.3% and 1% from entry\n- TP must be at least 1.5x SL distance\n- Leverage: max 3x\n- Max 3 setups per run\n- Confidence 5 or higher\n- Both LONG and SHORT allowed\n- Match direction to short-term momentum\n- Skip extremely volatile (24h move above 6%)\n\nOUTPUT: JSON array only.\nFormat: [{"symbol":"BTCUSDT","direction":"LONG","entry":78000,"sl":77766,"tp":78390,"leverage":3,"confidence":6,"reason":"brief"}]\n\nIf nothing qualifies: []\n\nData:\n' + msg;
   let arr = [], text = '';
   try { text = await claude(env.ANTHROPIC_API_KEY, { max_tokens: 800, messages: [{ role: 'user', content: prompt }] }); const a = text.indexOf('['), b = text.lastIndexOf(']'); if (a >= 0 && b > a) arr = JSON.parse(text.slice(a, b + 1)); } catch (e) { out.push('sig claude error ' + String(e.message).replace(/\s+/g, ' ').slice(0, 260)); return out; }
   out.push('sig asked Claude: ' + (Array.isArray(arr) ? arr.length : 0) + ' setup(s) returned'); // so a quiet run shows in the log
@@ -1224,6 +1228,7 @@ export async function tickAll(env) {
   const tholdRes = await tholdTick(db, rows, openAll.filter((p) => p.coin.endsWith(':thold')), ctl).catch((e) => ['thold error ' + String(e.message || e).slice(0, 80)]);
   const crashRes = await crashTick(db, rows, openAll.filter((p) => p.coin.endsWith(':crash')), ctl).catch((e) => ['crash error ' + String(e.message || e).slice(0, 80)]);
   const trendRes = await trendTick(db, rows, openAll.filter((p) => p.coin.endsWith(':trend')), ctl).catch((e) => ['trend error ' + String(e.message || e).slice(0, 80)]);
+  const trendxRes = await trendTick(db, rows, openAll.filter((p) => p.coin.endsWith(':trendx')), ctl, Date.now(), 'trendx', true, [25, 40]).catch((e) => ['trendx error ' + String(e.message || e).slice(0, 80)]);
   const sigRes = await sigTick(db, rows, openAll.filter((p) => p.coin.endsWith(':sig')), ctl, env).catch((e) => ['sig error ' + String(e.message || e).slice(0, 60)]);
   const revxRes = await revxTick(db, rows, openRevx, ctl).catch((e) => ['revx error ' + String(e.message || e).slice(0, 60)]);
   const pickRes = await picksTick(db, ctl).catch((e) => ['pick error ' + String(e.message || e).slice(0, 80)]);
@@ -1248,7 +1253,7 @@ export async function tickAll(env) {
   for (const md of MODES) shared.modes[md.id].n = md.cap - cnt[md.id];
   const todo = RETIRED.has('ai') ? [] : Array.from(openSet).concat(picks).filter((s) => COINS[s]); // AI desks retired 18 Oct: no Claude calls
   const res = await Promise.all(todo.map((coin) => tick(env, coin, shared).catch((e) => ({ coin, error: String(e.message || e).slice(0, 200) }))));
-  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, sig: sigRes, trend: trendRes, thold: tholdRes, crash: crashRes, scalp: scalpRes, liq: liqRes, oib: oibRes, lag: lagRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
+  return [{ scanned: rows.length, deadlinesPulled: pulled.length, fundingPrefetched: funded, picks, open: Array.from(openSet), algo: algoRes.filter((x) => /opened|closed|error/.test(x)), rev: revRes, rev2: rev2Res, revm: revmRes, flip: flipRes, revv: revvRes, caprev: capRes, revw: revwRes, revs: revsRes, pick: pickRes, revx: revxRes, sig: sigRes, trend: trendRes, thold: tholdRes, crash: crashRes, scalp: scalpRes, liq: liqRes, oib: oibRes, lag: lagRes, trendx: trendxRes, rev2s: rev2sRes, spl: splRes, spm: spmRes, dfc: dfcRes, rev3: r3Res, carry: carryRes, breadth: +breadth.toFixed(2), control: { paused: ctl.paused, off: Object.keys(ctl.off).filter((k) => ctl.off[k]), auto: Object.keys(ctl.auto), coinsOff: Object.keys(ctl.coinsOff).filter((k) => ctl.coinsOff[k]) }, mirrorsClosed: mirRes.filter(Boolean), limits: pendRes.filter(Boolean), openByDesk: cnt }].concat(res);
 }
 
 /* Pick which coin the news job scans next: coins with an open trade or the biggest 24h move, oldest scan first. */

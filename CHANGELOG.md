@@ -75,6 +75,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.57
+- AI signals: wider TP/SL bands + 15m/1h context; new desk Trend momentum vs BTC (only coins beating BTC over 30 days)
+
 ## v1.56
 - My trades: journal for real trades entered by hand (PIN-protected saves), daily goal tracker, balance vs goal chart
 
