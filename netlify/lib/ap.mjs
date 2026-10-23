@@ -11,9 +11,9 @@ export const REV_UNI = new Set(TOP.slice(0, TOP_N));
 /* 18 Oct reset: only the Rev family runs, $1,000 per strategy. Each leg is $100 margin (RM), 5 weakest long + 5 strongest short = 10 legs. Coins must also have at least REV_MIN_VOL USD of 24h volume. */
 export const RM = 100, REV_MIN_VOL = 10e6;
 export const revOk = (r) => REV_UNI.has(r.coin) && (r.vol_usd == null || r.vol_usd >= REV_MIN_VOL);
-export const RETIRED = new Set(['ai', 'n', 's', 'u', 'm', 'g', 'algo', 'algo2', 'algo3', 'algoq', 'algow', 'algox', 'algot', 'algo3b', 'algo100', 'rev100', 'flip', 'revv', 'r3w', 'r3m', 'r3y',
-  /* retired 21 Oct 2026 (Koko: trim to the desks worth a full 30 days): no new batches or resets; legs already open run to their normal close */
-  'revs', 'rev2', 'revx', 'spm', 'r3d']); // rev2s and spl back on 22 Oct (in profit, Koko's call)
+/* 23 Oct 2026 (Koko: reactivate so we collect more data): the 21 Oct retirees (revs, rev2, revx, spm, r3d) and the daily rule desks flip and revv run again.
+   Still off: the Claude AI desks (API cost) and the per-coin Algo desks (8 variants x 50 coins would push the 5-minute tick past its time limit). */
+export const RETIRED = new Set(['ai', 'n', 's', 'u', 'm', 'g', 'algo', 'algo2', 'algo3', 'algoq', 'algow', 'algox', 'algot', 'algo3b', 'algo100', 'rev100', 'r3w', 'r3m', 'r3y']);
 export const MAX_SPREAD_BPS = 12;
 /* Four AI desks read the SAME Claude decision and differ only in how easily they act on it. Each has its own $250 per coin.
    Normal ':n', Aggressive '' (the original desk), Super ':s', Ultra ':u'. picks = how many of the biggest movers it may trade. */
@@ -236,7 +236,7 @@ export const spotFees = (p, endMs) => +p.notional * SPOT.fee * 2 + (/:spm$/.test
 export const closePos = async (db, p, exit, why) => {
   const dir = p.side === 'LONG' ? 1 : -1;
   const funding = perpFunded(p.coin) && p.opened_at ? await rev3Funding(p).catch(() => 0) : 0;
-  const fees = /:sp[lm]$/.test(p.coin) ? spotFees(p, Date.now()) : /:fdt$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why) === 'time exit' ? MAKER_FEE : FEE)) : /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - RM * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + (String(why) === 'time exit' ? MAKER_FEE : FEE)) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
+  const fees = /:sp[lm]$/.test(p.coin) ? spotFees(p, Date.now()) : /:fdt$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why) === 'time exit' ? MAKER_FEE : FEE)) : /:core$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why) === 'stop hit' ? FEE : MAKER_FEE)) : /:revm$/.test(p.coin) ? p.notional * ((Math.abs(+p.notional - RM * REV2.lev0) < 1e-6 ? MAKER_FEE : FEE) + (String(why) === 'time exit' ? MAKER_FEE : FEE)) : /:m$/.test(p.coin) ? p.notional * (MAKER_FEE + (String(why).startsWith('take profit') ? MAKER_FEE : FEE)) : p.notional * FEE * 2, pnl = p.notional * (dir * (exit - p.entry_price)) / p.entry_price - fees + funding;
   await db.update('ap_positions', 'id=eq.' + p.id, { status: 'closed', exit_price: exit, closed_at: new Date().toISOString(), pnl, fees, close_reason: funding ? why + ' | funding ' + (funding >= 0 ? '+' : '') + funding.toFixed(2) : why });
   return pnl;
 };

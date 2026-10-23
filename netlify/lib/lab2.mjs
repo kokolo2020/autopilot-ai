@@ -189,22 +189,52 @@ export async function fspTick(db, legs, tk, ctl, now, out) {
   if (!c.length) out.push('fsp: no coin with a funding gap of ' + FSP.enterAnn + '%/yr or more (' + Object.keys(H).length + ' Hyperliquid markets)');
 }
 
+/* ---------- :core CORE (from 23 Oct 2026) ----------
+   Built from five days of results: holding strong coins made money, fast trading lost to fees, timing entries into a falling market hurt.
+   Once a day (45-55 min after the 07:00 close): every held coin whose daily close is below its own 50-day average is sold. Free slots (max 5) are filled with
+   the strongest top-50 coins over 30 days that are above their 50-day average AND beat BTC's 30-day return (and are up). $200 margin at 2x each, held for as long
+   as the trend lasts (no weekly churn), -15% safety stop. Booked as limit orders (0.02% in and out); the stop pays the market-order fee. Paper only. */
+export const CORE = { k: 5, margin: 200, lev: 2, sma: 50, look: 30, stop: 0.15, minVol: 20e6 };
+export const smaOf = (c, n) => (c.length >= n ? c.slice(0, n).reduce((a, b) => a + b, 0) / n : null);
+export async function coreTick(db, live, tk, ctl, now, out) {
+  const since = now - boundaryAt(now); if (since < 45 * 60000 || since >= 55 * 60000 || ctlBlocks(ctl, 'core', '')) return;
+  const done = (await db.select('ap_decisions', 'select=ts&coin=eq.Lab%20desks&reason=like.*core%20checked*&ts=gte.' + new Date(boundaryAt(now)).toISOString() + '&limit=1').catch(() => []));
+  if (done.length) return; // one decision per day
+  const uni = [...REV_UNI].filter((c) => !STABLE.has(c) && tk[c + '-USDT-SWAP'] && +tk[c + '-USDT-SWAP'].volCcy24h * +tk[c + '-USDT-SWAP'].last >= CORE.minVol);
+  const C = {}; for (const c of new Set(uni.concat(live.map((p) => p.coin.split(':')[0])).concat(['BTC']))) C[c] = null;
+  const names = Object.keys(C);
+  for (let i = 0; i < names.length; i += 10) { await Promise.all(names.slice(i, i + 10).map(async (c) => { try { C[c] = await dailyCloses(c + '-USDT', CORE.sma + 2); } catch (e) {} })); await sleep(300); }
+  const px = (c) => (tk[c + '-USDT-SWAP'] ? +tk[c + '-USDT-SWAP'].last : null);
+  const btc = C.BTC, bar = btc && btc.length > CORE.look && px('BTC') ? px('BTC') / btc[CORE.look - 1] - 1 : 0;
+  let held = live.slice();
+  for (const p of live) {
+    const c = p.coin.split(':')[0], cl = C[c], m = cl && smaOf(cl, CORE.sma), price = px(c);
+    if (m && price && cl[0] < m) { const v = await closePos(db, p, price, 'trend exit: close below 50-day average'); held = held.filter((x) => x.id !== p.id); out.push('core sold ' + c + ' (close ' + cl[0] + ' < 50d ' + m.toPrecision(5) + ') ' + v.toFixed(2)); }
+  }
+  const have = new Set(held.map((p) => p.coin.split(':')[0])), free = CORE.k - held.length;
+  const cand = uni.filter((c) => c !== 'BTC' && !have.has(c) && !(ctl && ctl.coinsOff && ctl.coinsOff[c])).map((c) => { const cl = C[c], m = cl && smaOf(cl, CORE.sma), p = px(c); return cl && m && p && cl.length > CORE.look ? { c, p, ret: p / cl[CORE.look - 1] - 1, above: cl[0] > m } : null; })
+    .filter((x) => x && x.above && x.ret > 0 && x.ret > bar).sort((a, b) => b.ret - a.ret);
+  for (const x of cand.slice(0, Math.max(0, free))) { await open(db, x.c, 'core', 1, x.p, CORE.margin * CORE.lev, x.p * 100, x.p * (1 - CORE.stop), Date.UTC(2099, 11, 31)); out.push('core bought ' + x.c + ' (30d ' + (x.ret * 100).toFixed(1) + '% vs BTC ' + (bar * 100).toFixed(1) + '%)'); }
+  out.push('core checked: holding ' + (held.length + Math.min(free, cand.length)) + '/' + CORE.k + (cand.length ? '' : ', no coin passes the trend + beats-BTC filter') + ' (BTC 30d ' + (bar * 100).toFixed(1) + '%)');
+}
+
 export async function lab2Tick(env, now = Date.now()) {
   if (!env.SUPABASE_SERVICE_KEY) return { skipped: 'missing key' };
   const db = sb(env.SUPABASE_SERVICE_KEY), out = [];
   const ctl = await loadControl(db); ctl.auto = await autoPaused(db, ctl.lossLimit).catch(() => ({}));
   const tk = {}; for (const t of await okx('/api/v5/market/tickers?instType=SWAP')) tk[t.instId] = t;
-  const all = await db.select('ap_positions', 'select=*&status=eq.open&or=(coin.like.*:fdt,coin.like.*:lsr,coin.like.*:rmom,coin.like.*:rmomr,coin.like.*:pair,coin.like.*:fspo,coin.like.*:fsph)');
-  const gone = await manageAll(db, all.filter((p) => /:(fdt|lsr|rmom|rmomr)$/.test(p.coin)), tk, out);
+  const all = await db.select('ap_positions', 'select=*&status=eq.open&or=(coin.like.*:fdt,coin.like.*:lsr,coin.like.*:rmom,coin.like.*:rmomr,coin.like.*:core,coin.like.*:pair,coin.like.*:fspo,coin.like.*:fsph)');
+  const gone = await manageAll(db, all.filter((p) => /:(fdt|lsr|rmom|rmomr|core)$/.test(p.coin)), tk, out);
   const live = (suf) => all.filter((p) => p.coin.endsWith(':' + suf) && !gone.has(p.id));
   const run = async (name, f) => { try { await f(); } catch (e) { out.push(name + ' error ' + String(e.message || e).slice(0, 100)); } };
   await run('fdt', () => fdtTick(db, live('fdt'), tk, ctl, now, out));
   await run('lsr', () => lsrTick(db, live('lsr'), tk, ctl, now, out));
   await run('rmom', () => rmomTick(db, live('rmom'), tk, ctl, now, out));
   await run('rmomr', () => rmomTick(db, live('rmomr'), tk, ctl, now, out, 'rmomr', true));
+  await run('core', () => coreTick(db, live('core'), tk, ctl, now, out));
   await run('pair', () => pairTick(db, live('pair'), tk, ctl, now, out));
   await run('fsp', () => fspTick(db, all.filter((p) => /:fsp[oh]$/.test(p.coin)), tk, ctl, now, out));
-  const mn = new Date(now).getUTCMinutes(), worth = out.some((x) => /opened|closed|converged|stop|limit|error|LONG|SHORT/.test(x)) || (mn >= 10 && mn < 15);
+  const mn = new Date(now).getUTCMinutes(), worth = out.some((x) => /opened|closed|converged|stop|limit|error|LONG|SHORT|core/.test(x)) || (mn >= 10 && mn < 15);
   if (out.length && worth) await db.insert('ap_decisions', { coin: 'Lab desks', action: 'PASS', confidence: 0, reason: out.join(' · ').slice(0, 340), price: 0, taken: out.some((x) => / opened |^(fdt|lsr|rmom|rmomr) (LONG|SHORT)/.test(x)) }).catch(() => null); // visible log on the research page
   return { at: new Date(now).toISOString(), open: all.length, out };
 }

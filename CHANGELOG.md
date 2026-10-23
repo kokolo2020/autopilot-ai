@@ -78,6 +78,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.59
+- Core desk (strong coins held while trending, limit fees); 7 retired desks reactivated; desk table tabs (New / Lab / Active / Reactivated)
+
 ## v1.58.1
 - AI signals: more room for Claude's reply (2000 tokens) and the log says why a reply had no text
 
