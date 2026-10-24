@@ -79,6 +79,10 @@ Every push bumps the version. The version shows next to the title on the page, s
 
 
 
+
+## v1.60
+- My picks + trend exit and My picks + BTC hedge desks (same 20 coins), My picks row on the research table
+
 ## v1.59
 - Core desk (strong coins held while trending, limit fees); 7 retired desks reactivated; desk table tabs (New / Lab / Active / Reactivated)
 

@@ -14,7 +14,7 @@
    :fspo + :fsph  FUNDING SPREAD OKX vs HYPERLIQUID - every 30 minutes compare each coin's annualised funding on the two exchanges. Spread >= 15%/yr: short
          where funding is higher, long where it is lower, $500 each leg (price moves cancel, the funding difference is the profit). Exit when the spread falls
          below 3%/yr or flips, or after 7 days. Up to 3 coins. Hyperliquid fees 0.045% per side. */
-import { sb, okx, closePos, manageOpen, ctlBlocks, loadControl, autoPaused, decFor, REV_UNI, boundaryAt, nextClose, batchDue, dailyCloses } from './ap.mjs';
+import { sb, okx, closePos, manageOpen, ctlBlocks, loadControl, autoPaused, decFor, REV_UNI, boundaryAt, nextClose, batchDue, dailyCloses, MYPICKS, pickQuote } from './ap.mjs';
 
 export const FDT = { minAbs: 0.00012, k: 3, from: 35, to: 45, afterMin: 5, tp: 1, sl: 1, n: 500 };
 export const LSR = { coins: ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'BNB', 'ADA', 'LINK', 'AVAX', 'SUI'], k: 2, holdH: 8, tp: 3, sl: 2, n: 500 };
@@ -218,12 +218,61 @@ export async function coreTick(db, live, tk, ctl, now, out) {
   out.push('core checked: holding ' + (held.length + Math.min(free, cand.length)) + '/' + CORE.k + (cand.length ? '' : ', no coin passes the trend + beats-BTC filter') + ' (BTC 30d ' + (bar * 100).toFixed(1) + '%)');
 }
 
+/* ---------- My picks variants (from 24 Oct 2026) ----------
+   My picks (Koko's 20 altcoins, $250 margin at 3x each, no stop) swung from +$523 to -$50 in one night when altcoins fell 3-15% while BTC dipped 0.7%.
+   Two copies of the same 20 coins test the two fixes, next to the untouched original:
+   :pickt  TREND EXIT - a coin is held only while its daily close is above its own 50-day average; sold when it closes below, bought back when it closes above
+           again (checked once a day, 07:45-07:55 Bangkok). Coins without enough daily history on OKX are skipped.
+   :pickh  BTC HEDGE  - all 20 longs plus one BTC short worth half the longs ($7,500), so a market-wide drop is partly offset. It does NOT help when altcoins
+           fall against BTC (the 24 Oct night), which is exactly what this desk will show.
+   Same sizes as the original ($250 x 3 = $750 per coin), no ladder add-ons, closed at -32% (liquidation level of 3x). Taker fees, OKX funding. Paper. */
+export const PICKV = { hedge: 0.5 };
+async function pickPrices(tk) {
+  const p = {}, miss = [];
+  for (const c of MYPICKS.coins) { const t = tk[c + '-USDT-SWAP']; if (t) p[c] = { last: +t.last, ask: +t.askPx > 0 ? +t.askPx : +t.last }; else miss.push(c); }
+  if (miss.length) { const sp = {}; try { for (const t of await okx('/api/v5/market/tickers?instType=SPOT')) sp[t.instId] = { last: +t.last, ask: +t.askPx > 0 ? +t.askPx : +t.last }; } catch (e) {} for (const c of miss) { const q = await pickQuote(c, sp).catch(() => null); if (q) p[c] = q; } }
+  if (tk['BTC-USDT-SWAP']) p._btc = { last: +tk['BTC-USDT-SWAP'].last };
+  return p;
+}
+async function pickLiq(db, live, px, out) {
+  const gone = new Set();
+  for (const p of live) { const c = p.coin.split(':')[0], q = px[c] || (c === 'BTC' && px._btc ? px._btc : null); const last = q ? q.last : null; if (last && (p.side === 'LONG' ? last <= +p.sl : last >= +p.sl)) { const v = await closePos(db, p, +p.sl, 'liquidated'); gone.add(p.id); out.push(p.coin + ' liquidated ' + v.toFixed(2)); } }
+  return live.filter((p) => !gone.has(p.id));
+}
+const pickN = () => MYPICKS.margin * MYPICKS.lev;
+export async function pickhTick(db, live, tk, ctl, now, out) {
+  if (ctlBlocks(ctl, 'pickh', '')) return;
+  const px = await pickPrices(tk); live = await pickLiq(db, live, px, out);
+  const ever = await db.select('ap_positions', 'select=id&coin=like.*:pickh&limit=1').catch(() => [1]);
+  if (ever.length) return; // opened once, held like the original
+  let tot = 0;
+  for (const c of MYPICKS.coins) { const q = px[c]; if (!q || !(q.ask > 0)) { out.push('pickh ' + c + ' has no price'); continue; } await open(db, c, 'pickh', 1, q.ask, pickN(), q.ask * 100, q.ask * (1 + MYPICKS.liqAt), Date.UTC(2099, 11, 31)); tot += pickN(); }
+  const b = tk['BTC-USDT-SWAP']; if (b && tot) { const h = tot * PICKV.hedge, bp = +b.last; await open(db, 'BTC', 'pickh', -1, bp, h, bp * 0.01, bp * (1 - MYPICKS.liqAt), Date.UTC(2099, 11, 31)); out.push('pickh opened ' + (tot / pickN()) + ' longs ($' + tot + ') + BTC short $' + h); }
+}
+export async function picktTick(db, live, tk, ctl, now, out) {
+  if (ctlBlocks(ctl, 'pickt', '')) return;
+  const px = await pickPrices(tk); live = await pickLiq(db, live, px, out);
+  const ever = await db.select('ap_positions', 'select=id&coin=like.*:pickt&limit=1').catch(() => [1]);
+  const since = now - boundaryAt(now), inWindow = since >= 45 * 60000 && since < 55 * 60000;
+  if (ever.length && !inWindow) return; // first run starts at once, then once a day after the close
+  if (ever.length) { const done = await db.select('ap_decisions', 'select=ts&coin=eq.Lab%20desks&reason=like.*pickt%20checked*&ts=gte.' + new Date(boundaryAt(now)).toISOString() + '&limit=1').catch(() => [1]); if (done.length) return; }
+  let up = 0, down = 0, skip = [];
+  for (let i = 0; i < MYPICKS.coins.length; i += 5) await Promise.all(MYPICKS.coins.slice(i, i + 5).map(async (c) => {
+    const q = px[c]; let cl = null; try { cl = await dailyCloses(c + '-USDT', 52); } catch (e) {}
+    const m = cl && cl.length >= 50 ? smaOf(cl, 50) : null, mine = live.filter((p) => p.coin === c + ':pickt');
+    if (!m || !q) { skip.push(c); return; }
+    if (cl[0] < m) { down++; for (const p of mine) { const v = await closePos(db, p, q.last, 'trend exit: close below 50-day average'); out.push('pickt sold ' + c + ' ' + v.toFixed(2)); } }
+    else { up++; if (!mine.length) { await open(db, c, 'pickt', 1, q.ask, pickN(), q.ask * 100, q.ask * (1 + MYPICKS.liqAt), Date.UTC(2099, 11, 31)); out.push('pickt bought ' + c); } }
+  }));
+  out.push('pickt checked: ' + up + ' above 50d (held), ' + down + ' below (cash)' + (skip.length ? ', no history: ' + skip.join(' ') : ''));
+}
+
 export async function lab2Tick(env, now = Date.now()) {
   if (!env.SUPABASE_SERVICE_KEY) return { skipped: 'missing key' };
   const db = sb(env.SUPABASE_SERVICE_KEY), out = [];
   const ctl = await loadControl(db); ctl.auto = await autoPaused(db, ctl.lossLimit).catch(() => ({}));
   const tk = {}; for (const t of await okx('/api/v5/market/tickers?instType=SWAP')) tk[t.instId] = t;
-  const all = await db.select('ap_positions', 'select=*&status=eq.open&or=(coin.like.*:fdt,coin.like.*:lsr,coin.like.*:rmom,coin.like.*:rmomr,coin.like.*:core,coin.like.*:pair,coin.like.*:fspo,coin.like.*:fsph)');
+  const all = await db.select('ap_positions', 'select=*&status=eq.open&or=(coin.like.*:fdt,coin.like.*:lsr,coin.like.*:rmom,coin.like.*:rmomr,coin.like.*:core,coin.like.*:pickt,coin.like.*:pickh,coin.like.*:pair,coin.like.*:fspo,coin.like.*:fsph)');
   const gone = await manageAll(db, all.filter((p) => /:(fdt|lsr|rmom|rmomr|core)$/.test(p.coin)), tk, out);
   const live = (suf) => all.filter((p) => p.coin.endsWith(':' + suf) && !gone.has(p.id));
   const run = async (name, f) => { try { await f(); } catch (e) { out.push(name + ' error ' + String(e.message || e).slice(0, 100)); } };
@@ -232,9 +281,11 @@ export async function lab2Tick(env, now = Date.now()) {
   await run('rmom', () => rmomTick(db, live('rmom'), tk, ctl, now, out));
   await run('rmomr', () => rmomTick(db, live('rmomr'), tk, ctl, now, out, 'rmomr', true));
   await run('core', () => coreTick(db, live('core'), tk, ctl, now, out));
+  await run('pickt', () => picktTick(db, live('pickt'), tk, ctl, now, out));
+  await run('pickh', () => pickhTick(db, live('pickh'), tk, ctl, now, out));
   await run('pair', () => pairTick(db, live('pair'), tk, ctl, now, out));
   await run('fsp', () => fspTick(db, all.filter((p) => /:fsp[oh]$/.test(p.coin)), tk, ctl, now, out));
-  const mn = new Date(now).getUTCMinutes(), worth = out.some((x) => /opened|closed|converged|stop|limit|error|LONG|SHORT|core/.test(x)) || (mn >= 10 && mn < 15);
+  const mn = new Date(now).getUTCMinutes(), worth = out.some((x) => /opened|closed|converged|stop|limit|error|LONG|SHORT|core|pickt|liquidated/.test(x)) || (mn >= 10 && mn < 15);
   if (out.length && worth) await db.insert('ap_decisions', { coin: 'Lab desks', action: 'PASS', confidence: 0, reason: out.join(' · ').slice(0, 340), price: 0, taken: out.some((x) => / opened |^(fdt|lsr|rmom|rmomr) (LONG|SHORT)/.test(x)) }).catch(() => null); // visible log on the research page
   return { at: new Date(now).toISOString(), open: all.length, out };
 }
